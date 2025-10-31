@@ -28,24 +28,45 @@ def load_excel(path: str) -> Dict[str, pd.DataFrame]:
     return dfs
 
 @st.cache_data(show_spinner=False)
-def load_sheets(sheet_name: str) -> Dict[str, pd.DataFrame]:
-    """Read all worksheets from a Google Sheet shared to Service Account."""
+def load_sheets(sheet_name: str = "", sheet_key: str = "") -> Dict[str, pd.DataFrame]:
+    """
+    Đọc toàn bộ worksheet từ Google Sheets.
+    - sheet_key: ID trong URL (ưu tiên nếu có)
+    - sheet_name: Tên file Sheets (dùng khi không có sheet_key)
+    """
     import gspread
     from oauth2client.service_account import ServiceAccountCredentials
-    scope = ["https://spreadsheets.google.com/feeds",
-             "https://www.googleapis.com/auth/drive"]
-    creds = ServiceAccountCredentials.from_json_keyfile_dict(
-        dict(st.secrets["gspread_service_account"]), scope
+
+    scope = [
+        "https://spreadsheets.google.com/feeds",
+        "https://www.googleapis.com/auth/drive",
+    ]
+    # Lấy key từ secrets dạng [gspread_service_account]
+    info = dict(st.secrets["gspread_service_account"])
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(info, scope)
+    client = gspread.authorize(creds)
+
+    # Mở file theo KEY (ổn định nhất) hoặc theo NAME
+    if sheet_key:
+        sh = client.open_by_key(sheet_key)
+    else:
+        sh = client.open(sheet_name)
+
+    # Nạp tất cả worksheet thành DataFrame
+    dfs: Dict[str, pd.DataFrame] = {}
+    titles = [ws.title for ws in sh.worksheets()]
+    for title in titles:
+        ws = sh.worksheet(title)
+        data = ws.get_all_records()
+        dfs[title] = pd.DataFrame(data).fillna("")
+
+    # Hiển thị debug giúp kiểm tra đúng file
+    st.caption(
+        "Nguồn dữ liệu: **Google Sheets** • "
+        f"Worksheets: {', '.join(titles) if titles else '(trống)'}"
     )
-    gc = gspread.authorize(creds)
-    sh = gc.open(sheet_name)
-    dfs = {}
-    for ws in sh.worksheets():
-        try:
-            dfs[ws.title] = pd.DataFrame(ws.get_all_records()).fillna("")
-        except Exception:
-            dfs[ws.title] = pd.DataFrame()
     return dfs
+
 
 @st.cache_data(show_spinner=False)
 def load_settings(dfs: Dict[str, pd.DataFrame]) -> Dict[str, str]:
@@ -279,8 +300,8 @@ def main():
     source = st.secrets.get("DATA_SOURCE", "excel").strip().lower()
     try:
         if source == "sheets":
-            dfs = load_sheets(st.secrets["SHEET_NAME"])
-            st.caption("Nguồn dữ liệu: **Google Sheets**")
+            sheet_key = st.secrets.get("SHEET_KEY", "").strip()  # có thì dùng, không có cũng ok
+            dfs = load_sheets(st.secrets["SHEET_NAME"], sheet_key)
         else:
             if not os.path.exists(DATA_FILE):
                 st.error(f"Không tìm thấy file dữ liệu: {DATA_FILE}")
