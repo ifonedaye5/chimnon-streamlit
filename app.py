@@ -35,7 +35,7 @@ def load_sheets(sheet_name: str) -> Dict[str, pd.DataFrame]:
     scope = ["https://spreadsheets.google.com/feeds",
              "https://www.googleapis.com/auth/drive"]
     creds = ServiceAccountCredentials.from_json_keyfile_dict(
-        json.loads(st.secrets["GSPREAD_SERVICE_ACCOUNT_JSON"]), scope
+        dict(st.secrets["gspread_service_account"]), scope
     )
     gc = gspread.authorize(creds)
     sh = gc.open(sheet_name)
