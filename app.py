@@ -110,18 +110,23 @@ def compute_standings(teams_df: pd.DataFrame, matches_df: pd.DataFrame, events_d
         if tid not in stats:  stats[tid] = {"P":0,"W":0,"D":0,"L":0,"GF":0,"GA":0,"GD":0}
 
     for _, r in mdf.iterrows():
-        h, a = str(r["home_team_id"]).strip(), str(r["away_team_id"]).strip()
-        hg, ag = int(r["home_goals"]), int(r["away_goals"])
-        ensure(h); ensure(a)
-        stats[h]["P"] += 1; stats[a]["P"] += 1
-        stats[h]["GF"] += hg; stats[h]["GA"] += ag; stats[h]["GD"] = stats[h]["GF"]-stats[h]["GA"]
-        stats[a]["GF"] += ag; stats[a]["GA"] += hg; stats[a]["GD"] = stats[a]["GF"]-stats[a]["GA"]
-        if hg > ag:
-            points[h]+=3; stats[h]["W"]+=1; stats[a]["L"]+=1
-        elif hg < ag:
-            points[a]+=3; stats[a]["W"]+=1; stats[h]["L"]+=1
-        else:
-            points[h]+=1; points[a]+=1; stats[h]["D"]+=1; stats[a]["D"]+=1
+    status = str(r.get("status", "")).strip().lower()
+    if status not in ("finished", "hoàn thành", "kết thúc"):
+        continue  # Bỏ qua các trận chưa đá
+
+    h, a = str(r["home_team_id"]).strip(), str(r["away_team_id"]).strip()
+    hg, ag = int(r["home_goals"]), int(r["away_goals"])
+    ensure(h); ensure(a)
+    stats[h]["P"] += 1; stats[a]["P"] += 1
+    stats[h]["GF"] += hg; stats[h]["GA"] += ag; stats[h]["GD"] = stats[h]["GF"]-stats[h]["GA"]
+    stats[a]["GF"] += ag; stats[a]["GA"] += hg; stats[a]["GD"] = stats[a]["GF"]-stats[a]["GA"]
+    if hg > ag:
+        points[h]+=3; stats[h]["W"]+=1; stats[a]["L"]+=1
+    elif hg < ag:
+        points[a]+=3; stats[a]["W"]+=1; stats[h]["L"]+=1
+    else:
+        points[h]+=1; points[a]+=1; stats[h]["D"]+=1; stats[a]["D"]+=1
+
 
     # Fair-Play
     fair = compute_fairplay(events_df)
