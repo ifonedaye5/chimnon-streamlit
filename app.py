@@ -109,23 +109,50 @@ def compute_standings(teams_df: pd.DataFrame, matches_df: pd.DataFrame, events_d
         if tid not in points: points[tid] = 0
         if tid not in stats:  stats[tid] = {"P":0,"W":0,"D":0,"L":0,"GF":0,"GA":0,"GD":0}
 
-    for _, r in mdf.iterrows():
-    status = str(r.get("status", "")).strip().lower()
-    if status not in ("finished", "hoàn thành", "kết thúc"):
-        continue  # Bỏ qua các trận chưa đá
+    # Chuẩn hóa cột tỉ số và trạng thái
+matches_df["home_goals"] = pd.to_numeric(matches_df.get("home_goals"), errors="coerce")
+matches_df["away_goals"] = pd.to_numeric(matches_df.get("away_goals"), errors="coerce")
 
-    h, a = str(r["home_team_id"]).strip(), str(r["away_team_id"]).strip()
-    hg, ag = int(r["home_goals"]), int(r["away_goals"])
-    ensure(h); ensure(a)
-    stats[h]["P"] += 1; stats[a]["P"] += 1
-    stats[h]["GF"] += hg; stats[h]["GA"] += ag; stats[h]["GD"] = stats[h]["GF"]-stats[h]["GA"]
-    stats[a]["GF"] += ag; stats[a]["GA"] += hg; stats[a]["GD"] = stats[a]["GF"]-stats[a]["GA"]
+# chuẩn hóa status: lower-case & bỏ khoảng trắng
+status_series = matches_df.get("status").astype(str).str.strip().str.lower()
+
+# các giá trị được coi là "đã kết thúc"
+FINISHED_VALUES = {"finished", "kết thúc", "ket thuc", "done", "ft"}
+
+# -> chỉ lấy những trận có status kết thúc VÀ có đủ tỉ số
+played_mask = status_series.isin(FINISHED_VALUES) & \
+              matches_df["home_goals"].notna() & matches_df["away_goals"].notna()
+
+for _, row in matches_df[played_mask].iterrows():
+    home = row["home_team_id"]
+    away = row["away_team_id"]
+    hg = int(row["home_goals"])
+    ag = int(row["away_goals"])
+
+    # tăng số trận
+    standings[home]["played"] += 1
+    standings[away]["played"] += 1
+
+    # bàn thắng/bàn thua
+    standings[home]["gf"] += hg
+    standings[home]["ga"] += ag
+    standings[away]["gf"] += ag
+    standings[away]["ga"] += hg
+
+    # kết quả & điểm
     if hg > ag:
-        points[h]+=3; stats[h]["W"]+=1; stats[a]["L"]+=1
+        standings[home]["wins"] += 1
+        standings[away]["losses"] += 1
+        standings[home]["points"] += 3
     elif hg < ag:
-        points[a]+=3; stats[a]["W"]+=1; stats[h]["L"]+=1
+        standings[away]["wins"] += 1
+        standings[home]["losses"] += 1
+        standings[away]["points"] += 3
     else:
-        points[h]+=1; points[a]+=1; stats[h]["D"]+=1; stats[a]["D"]+=1
+        standings[home]["draws"] += 1
+        standings[away]["draws"] += 1
+        standings[home]["points"] += 1
+        standings[away]["points"] += 1
 
 
     # Fair-Play
