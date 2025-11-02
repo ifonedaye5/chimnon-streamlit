@@ -330,7 +330,7 @@ st.title("Giải Chim Non Lần 2 — League Manager")
         # if not SHEET_KEY:
             # st.error("Chưa có SHEET_KEY trong Secrets (đặt ở cấp gốc, không nằm trong [gspread_service_account]).")
             # st.stop()
-        Thử mở bằng KEY chỉ để xác nhận; không dùng đối tượng sh cho cache
+        # Thử mở bằng KEY chỉ để xác nhận; không dùng đối tượng sh cho cache
         # try:
             # _client = get_gspread_client()
             # _client.open_by_key(SHEET_KEY)
