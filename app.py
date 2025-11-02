@@ -77,134 +77,238 @@ def compute_fairplay(events_df: pd.DataFrame) -> dict:
         pts[team] = pts.get(team, 0) + add
     return pts
 
-def compute_standings(teams_df: pd.DataFrame, matches_df: pd.DataFrame, events_df: pd.DataFrame=None) -> pd.DataFrame:
+def compute_standings(
+    teams_df: pd.DataFrame,
+    matches_df: pd.DataFrame,
+    events_df: pd.DataFrame = None
+) -> pd.DataFrame:
     """
-    BXH theo đúng ưu tiên Điều lệ Thành Dũng:
-      1) Đối đầu trực tiếp
-      2) Hiệu số (GD)
-      3) Bàn thắng (GF)
+    Tính BXH theo điều lệ:
+      1) Đối đầu trực tiếp (Head-to-Head)
+      2) Hiệu số bàn thắng (HS / GD)
+      3) Bàn thắng ghi được (BT / GF)
       4) Fair-Play (ít hơn xếp trên)
-    Giữ nguyên format cột như bản cũ, có thêm cột FairPlay để minh bạch.
+
+    Chỉ tính KHI trận đã kết thúc (status Finished/Kết thúc) và có đủ tỉ số.
+    Trả về các cột (tiếng Việt) giống bản trước: 
+      Team ID | Đội | Trận | Thắng | Hòa | Thua | BT | BB | HS | Điểm | FairPlay
     """
-    if teams_df.empty or matches_df.empty:
+    # Bảo vệ dữ liệu đầu vào
+    if teams_df is None or teams_df.empty or matches_df is None or matches_df.empty:
         return pd.DataFrame()
 
-    # Chuẩn cột
+    # Chuẩn hóa tên cột
     tdf = teams_df.copy()
     tdf.columns = [c.strip().lower() for c in tdf.columns]
+
     mdf = matches_df.copy()
     mdf.columns = [c.strip().lower() for c in mdf.columns]
 
-    needed = {"home_team_id", "away_team_id", "home_goals", "away_goals"}
-    if not needed.issubset(set(mdf.columns)):
+    # Kiểm tra cột bắt buộc
+    need_cols = {"home_team_id", "away_team_id", "home_goals", "away_goals"}
+    if not need_cols.issubset(set(mdf.columns)):
         return pd.DataFrame()
 
-    # Ép số
-    for c in ["home_goals", "away_goals"]:
-        mdf[c] = pd.to_numeric(mdf[c], errors="coerce").fillna(0).astype(int)
+    # Ép kiểu số nhưng KHÔNG fill 0 để tránh coi trận chưa đá như 0-0
+    mdf["home_goals"] = pd.to_numeric(mdf["home_goals"], errors="coerce")
+    mdf["away_goals"] = pd.to_numeric(mdf["away_goals"], errors="coerce")
 
-    # Bảng điểm thô
-    points, stats = {}, {}
-    def ensure(tid):
-        if tid not in points: points[tid] = 0
-        if tid not in stats:  stats[tid] = {"P":0,"W":0,"D":0,"L":0,"GF":0,"GA":0,"GD":0}
+    # Chuẩn hóa trạng thái và lọc chỉ lấy trận đã kết thúc + có tỉ số
+    status = mdf.get("status")
+    if status is not None:
+        status = status.astype(str).str.strip().str.lower()
+        FINISHED = {"finished", "kết thúc", "ket thuc", "done", "ft"}
+        played_mask = (
+            status.isin(FINISHED)
+            & mdf["home_goals"].notna()
+            & mdf["away_goals"].notna()
+        )
+    else:
+        # Nếu không có cột status thì chỉ tính trận có đủ tỉ số
+        played_mask = mdf["home_goals"].notna() & mdf["away_goals"].notna()
 
-    for _, r in mdf.iterrows():
-        h, a = str(r["home_team_id"]).strip(), str(r["away_team_id"]).strip()
-        hg, ag = int(r["home_goals"]), int(r["away_goals"])
-        ensure(h); ensure(a)
-        stats[h]["P"] += 1; stats[a]["P"] += 1
-        stats[h]["GF"] += hg; stats[h]["GA"] += ag; stats[h]["GD"] = stats[h]["GF"]-stats[h]["GA"]
-        stats[a]["GF"] += ag; stats[a]["GA"] += hg; stats[a]["GD"] = stats[a]["GF"]-stats[a]["GA"]
+    m_played = mdf.loc[played_mask].copy()
+
+    # Sổ thống kê
+    points: dict[str, int] = {}
+    stats: dict[str, dict] = {}
+
+    def ensure(team_id: str):
+        if team_id not in points:
+            points[team_id] = 0
+        if team_id not in stats:
+            stats[team_id] = {"P": 0, "W": 0, "D": 0, "L": 0, "GF": 0, "GA": 0, "GD": 0}
+
+    # Ghi nhận kết quả CHỈ từ m_played
+    for _, r in m_played.iterrows():
+        h = str(r["home_team_id"]).strip()
+        a = str(r["away_team_id"]).strip()
+        hg = int(r["home_goals"])
+        ag = int(r["away_goals"])
+        ensure(h)
+        ensure(a)
+
+        # Trận đã đá
+        stats[h]["P"] += 1
+        stats[a]["P"] += 1
+
+        # Bàn thắng / thua
+        stats[h]["GF"] += hg
+        stats[h]["GA"] += ag
+        stats[a]["GF"] += ag
+        stats[a]["GA"] += hg
+        stats[h]["GD"] = stats[h]["GF"] - stats[h]["GA"]
+        stats[a]["GD"] = stats[a]["GF"] - stats[a]["GA"]
+
+        # Điểm
         if hg > ag:
-            points[h]+=3; stats[h]["W"]+=1; stats[a]["L"]+=1
+            points[h] += 3
+            stats[h]["W"] += 1
+            stats[a]["L"] += 1
         elif hg < ag:
-            points[a]+=3; stats[a]["W"]+=1; stats[h]["L"]+=1
+            points[a] += 3
+            stats[a]["W"] += 1
+            stats[h]["L"] += 1
         else:
-            points[h]+=1; points[a]+=1; stats[h]["D"]+=1; stats[a]["D"]+=1
+            points[h] += 1
+            points[a] += 1
+            stats[h]["D"] += 1
+            stats[a]["D"] += 1
 
     # Fair-Play
     fair = compute_fairplay(events_df)
-    # Tạo bảng hiển thị
-    name_col = "team_name" if "team_name" in tdf.columns else ("short_name" if "short_name" in tdf.columns else "team_id")
+
+    # Xác định cột tên đội để hiển thị
+    name_col = (
+        "team_name"
+        if "team_name" in tdf.columns
+        else ("short_name" if "short_name" in tdf.columns else "team_id")
+    )
+
+    # Lập bảng kết quả cho TẤT CẢ các đội (kể cả đội chưa đá)
     rows = []
     for _, tr in tdf.iterrows():
         tid = str(tr.get("team_id", "")).strip()
-        if not tid: 
+        if not tid:
             continue
-        s = stats.get(tid, {"P":0,"W":0,"D":0,"L":0,"GF":0,"GA":0,"GD":0})
-        rows.append({
-            "Team ID": tid,
-            "Đội": tr.get(name_col, tid),
-            "Trận": s["P"], "Thắng": s["W"], "Hòa": s["D"], "Thua": s["L"],
-            "BT": s["GF"], "BB": s["GA"], "HS": s["GD"], "Điểm": points.get(tid,0),
-            "FairPlay": fair.get(tid, 0)
-        })
+        s = stats.get(tid, {"P": 0, "W": 0, "D": 0, "L": 0, "GF": 0, "GA": 0, "GD": 0})
+        rows.append(
+            {
+                "Team ID": tid,
+                "Đội": tr.get(name_col, tid),
+                "Trận": s["P"],
+                "Thắng": s["W"],
+                "Hòa": s["D"],
+                "Thua": s["L"],
+                "BT": s["GF"],
+                "BB": s["GA"],
+                "HS": s["GD"],
+                "Điểm": points.get(tid, 0),
+                "FairPlay": fair.get(tid, 0),
+            }
+        )
+
     df = pd.DataFrame(rows)
     if df.empty:
         return df
 
-    # ---- HEAD-TO-HEAD comparator ----
+    # ===== Sắp xếp theo ưu tiên: H2H -> HS -> BT -> Fair-Play =====
+    # Chuẩn bị dữ liệu đối đầu: chỉ dùng các trận "đã chơi"
+    m_h2h = m_played[["home_team_id", "away_team_id", "home_goals", "away_goals"]].copy()
+    m_h2h["home_team_id"] = m_h2h["home_team_id"].astype(str).str.strip()
+    m_h2h["away_team_id"] = m_h2h["away_team_id"].astype(str).str.strip()
+
     from functools import cmp_to_key
+
     def head_to_head(t1: str, t2: str) -> int:
-        """Trả về 1 nếu t1 > t2 (t1 xếp trên), -1 nếu t1 < t2, 0 nếu bằng theo đối đầu."""
-        sub = mdf[((mdf["home_team_id"].astype(str)==t1) & (mdf["away_team_id"].astype(str)==t2)) |
-                  ((mdf["home_team_id"].astype(str)==t2) & (mdf["away_team_id"].astype(str)==t1))]
+        """
+        So sánh t1 với t2:
+        trả về  1 nếu t1 xếp TRÊN t2,
+                -1 nếu t1 xếp DƯỚI t2,
+                 0 nếu bằng nhau theo H2H.
+        """
+        sub = m_h2h[
+            ((m_h2h["home_team_id"] == t1) & (m_h2h["away_team_id"] == t2))
+            | ((m_h2h["home_team_id"] == t2) & (m_h2h["away_team_id"] == t1))
+        ]
         if sub.empty:
             return 0
-        pts1 = pts2 = gd1 = gd2 = gf1 = gf2 = 0
+
+        pts1 = pts2 = 0
+        gd1 = gd2 = 0
+        gf1 = gf2 = 0
+
         for _, m in sub.iterrows():
-            h, a = str(m["home_team_id"]), str(m["away_team_id"])
+            h, a = m["home_team_id"], m["away_team_id"]
             hg, ag = int(m["home_goals"]), int(m["away_goals"])
             if h == t1:
-                gf1 += hg; gf2 += ag; gd1 += (hg-ag); gd2 += (ag-hg)
-                if hg > ag: pts1 += 3
-                elif hg < ag: pts2 += 3
-                else: pts1 += 1; pts2 += 1
-            elif a == t1:
-                gf1 += ag; gf2 += hg; gd1 += (ag-hg); gd2 += (hg-ag)
-                if ag > hg: pts1 += 3
-                elif ag < hg: pts2 += 3
-                else: pts1 += 1; pts2 += 1
-        if pts1 != pts2: return 1 if pts1 > pts2 else -1
-        if gd1  != gd2:  return 1 if gd1  > gd2  else -1
-        if gf1  != gf2:  return 1 if gf1  > gf2  else -1
+                gf1 += hg
+                gf2 += ag
+                gd1 += (hg - ag)
+                gd2 += (ag - hg)
+                if hg > ag:
+                    pts1 += 3
+                elif hg < ag:
+                    pts2 += 3
+                else:
+                    pts1 += 1
+                    pts2 += 1
+            else:  # a == t1
+                gf1 += ag
+                gf2 += hg
+                gd1 += (ag - hg)
+                gd2 += (hg - ag)
+                if ag > hg:
+                    pts1 += 3
+                elif ag < hg:
+                    pts2 += 3
+                else:
+                    pts1 += 1
+                    pts2 += 1
+
+        if pts1 != pts2:
+            return 1 if pts1 > pts2 else -1
+        if gd1 != gd2:
+            return 1 if gd1 > gd2 else -1
+        if gf1 != gf2:
+            return 1 if gf1 > gf2 else -1
         return 0
 
-    # Map nhanh chỉ số theo Team ID
     by_id = df.set_index("Team ID")
 
     def cmp(a: str, b: str) -> int:
-        # 1) Đối đầu trực tiếp
+        # 1) H2H
         hh = head_to_head(a, b)
         if hh != 0:
-            return -hh  # head_to_head trả 1 nghĩa là a tốt hơn -> sort tăng cần đảo dấu
+            # head_to_head trả 1 -> a > b (a xếp TRÊN), nhưng sort tăng nên đảo dấu
+            return -hh
 
-        # 2) Hiệu số GD
+        # 2) HS (lớn hơn tốt hơn)
         gd_a, gd_b = by_id.at[a, "HS"], by_id.at[b, "HS"]
         if gd_a != gd_b:
             return -1 if gd_a > gd_b else 1
 
-        # 3) Bàn thắng GF
+        # 3) BT (lớn hơn tốt hơn)
         gf_a, gf_b = by_id.at[a, "BT"], by_id.at[b, "BT"]
         if gf_a != gf_b:
             return -1 if gf_a > gf_b else 1
 
-        # 4) Fair-Play (ít hơn xếp trên)
+        # 4) Fair-Play (ít hơn tốt hơn)
         fp_a, fp_b = by_id.at[a, "FairPlay"], by_id.at[b, "FairPlay"]
         if fp_a != fp_b:
             return -1 if fp_a < fp_b else 1
 
-        return 0
+        # 5) Cuối cùng: Team ID để ổn định
+        return -1 if a < b else (1 if a > b else 0)
 
-    # Sắp xếp theo: Điểm (desc) trước rồi mới áp comparator để xử lý tie-break
-    df = df.sort_values(by=["Điểm"], ascending=False).reset_index(drop=True)
     order = sorted(df["Team ID"].tolist(), key=cmp_to_key(cmp))
-    df = by_id.loc[order].reset_index()
+    df = df.set_index("Team ID").loc[order].reset_index()
 
-    # Cột Hạng
-    df.insert(0, "Hạng", range(1, len(df)+1))
+    # Thêm cột "Hạng" (1..n)
+    df.insert(0, "Hạng", range(1, len(df) + 1))
+
     return df
+
 
 # ========== 4) UI ==========
 st.title("Giải Chim Non Lần 2 — League Manager")
