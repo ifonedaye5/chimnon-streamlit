@@ -249,9 +249,35 @@ with tab1:
     if teams_df.empty or matches_df.empty:
         st.warning("Thiếu sheet 'teams' hoặc 'matches' → chưa thể tính BXH.")
     else:
-        # ✅ Gọi hàm mới có H2H + GD + GF + FairPlay
-        standings = compute_standings(teams_df, matches_df, events_df)
-        st.dataframe(standings, use_container_width=True)
+        # Chuẩn hoá tên cột để lọc nhóm
+        tdf = teams_df.copy()
+        tdf.columns = [c.strip().lower() for c in tdf.columns]
+        mdf = matches_df.copy()
+        mdf.columns = [c.strip().lower() for c in mdf.columns]
+
+        view_mode = st.radio("Chế độ xem", ["Theo bảng (A/B)", "Tất cả"], horizontal=True)
+
+        def standings_group(grp: str):
+            # lọc theo cột 'group' trong cả teams và matches
+            t_sub = tdf[tdf.get("group", "").astype(str).str.upper() == grp]
+            m_sub = mdf[mdf.get("group", "").astype(str).str.upper() == grp]
+            return compute_standings(t_sub, m_sub, events_df)
+
+        if view_mode == "Theo bảng (A/B)":
+            c1, c2 = st.columns(2)
+            with c1:
+                st.markdown("#### Bảng A")
+                st.dataframe(standings_group("A"), use_container_width=True)
+            with c2:
+                st.markdown("#### Bảng B")
+                st.dataframe(standings_group("B"), use_container_width=True)
+        else:
+            # Gộp lại nhưng có cột 'Bảng' để dễ phân biệt
+            sA = standings_group("A"); sA.insert(1, "Bảng", "A")
+            sB = standings_group("B"); sB.insert(1, "Bảng", "B")
+            merged = pd.concat([sA, sB], ignore_index=True)
+            st.dataframe(merged, use_container_width=True)
+
 
 with tab2:
     st.subheader("Lịch thi đấu")
