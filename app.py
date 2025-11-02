@@ -284,7 +284,37 @@ with tab2:
     if matches_df.empty:
         st.info("Chưa có dữ liệu 'matches'.")
     else:
-        st.dataframe(matches_df, use_container_width=True)
+        # Chuẩn cột & map team_id -> team_name
+        tdf = teams_df.copy(); tdf.columns = [c.strip().lower() for c in tdf.columns]
+        mdf = matches_df.copy(); mdf.columns = [c.strip().lower() for c in mdf.columns]
+
+        name_map = dict(zip(tdf.get("team_id", []), tdf.get("team_name", [])))
+
+        mdf["Home"] = mdf["home_team_id"].map(name_map).fillna(mdf["home_team_id"])
+        mdf["Away"] = mdf["away_team_id"].map(name_map).fillna(mdf["away_team_id"])
+
+        # Bộ lọc nhanh
+        col1, col2 = st.columns(2)
+        with col1:
+            grp = st.selectbox("Chọn bảng", ["Tất cả", "A", "B"])
+        with col2:
+            rounds = sorted(mdf.get("round", []).dropna().unique().tolist())
+            rnd = st.selectbox("Chọn vòng", ["Tất cả"] + rounds)
+
+        show = mdf.copy()
+        if grp != "Tất cả":
+            show = show[show.get("group", "").astype(str).str.upper() == grp]
+        if rnd != "Tất cả":
+            show = show[show.get("round", "") == rnd]
+
+        # Bảng hiển thị đẹp
+        cols = [
+            "match_id","stage","group","round","date","time","venue",
+            "Home","Away","home_goals","away_goals","status","notes"
+        ]
+        cols = [c for c in cols if c in show.columns]
+        st.dataframe(show[cols], use_container_width=True)
+
 
 with tab3:
     left, right = st.columns([2,1])
