@@ -31,41 +31,65 @@ def load_excel(path: str) -> Dict[str, pd.DataFrame]:
 def load_sheets(sheet_name: str = "", sheet_key: str = "") -> Dict[str, pd.DataFrame]:
     """
     Đọc toàn bộ worksheet từ Google Sheets.
-    - sheet_key: ID trong URL (ưu tiên nếu có)
-    - sheet_name: Tên file Sheets (dùng khi không có sheet_key)
+    Ưu tiên mở theo sheet_key (ID). Nếu không có thì mở theo sheet_name (tên file).
+    Kèm debug: liệt kê các file SA thấy được và in lỗi API đầy đủ.
     """
     import gspread
     from oauth2client.service_account import ServiceAccountCredentials
+    from gspread.exceptions import APIError, SpreadsheetNotFound
 
     scope = [
         "https://spreadsheets.google.com/feeds",
         "https://www.googleapis.com/auth/drive",
     ]
-    # Lấy key từ secrets dạng [gspread_service_account]
-    info = dict(st.secrets["gspread_service_account"])
-    creds = ServiceAccountCredentials.from_json_keyfile_dict(info, scope)
+
+    # Lấy JSON key từ block [gspread_service_account] trong secrets TOML
+    sa_info = dict(st.secrets["gspread_service_account"])
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(sa_info, scope)
     client = gspread.authorize(creds)
 
-    # Mở file theo KEY (ổn định nhất) hoặc theo NAME
-    if sheet_key:
-        sh = client.open_by_key(sheet_key)
-    else:
-        sh = client.open(sheet_name)
+    # --- DEBUG: liệt kê các file SA thấy được (tối đa 50) ---
+    try:
+        files = client.list_spreadsheet_files()
+        if files:
+            dbg = pd.DataFrame(files)
+            st.caption("🔎 SA nhìn thấy các file (name / id):")
+            st.dataframe(dbg[["name", "id"]].head(50), use_container_width=True)
+    except Exception as e:
+        st.caption(f"⚠️ Không liệt kê được file: {e}")
 
-    # Nạp tất cả worksheet thành DataFrame
+    # --- Mở spreadsheet ---
+    try:
+        if sheet_key:
+            sh = client.open_by_key(sheet_key)
+            st.caption(f"✅ Mở bằng KEY: {sheet_key}")
+        else:
+            sh = client.open(sheet_name)
+            st.caption(f"✅ Mở bằng NAME: {sheet_name}")
+    except SpreadsheetNotFound:
+        st.error("❌ Không tìm thấy file. Kiểm tra lại SHEET_KEY/SHEET_NAME và quyền Share cho Service Account.")
+        raise
+    except APIError as e:
+        # In chi tiết phản hồi API (tránh log <Response [200]> mù mờ)
+        try:
+            st.error(f"❌ Google APIError: {e.response.status_code} {e.response.reason} — {e.response.text}")
+        except Exception:
+            st.error(f"❌ Google APIError: {e}")
+        raise
+    except Exception as e:
+        st.error(f"❌ Lỗi mở spreadsheet: {e}")
+        raise
+
+    # --- Đọc tất cả worksheet ---
     dfs: Dict[str, pd.DataFrame] = {}
     titles = [ws.title for ws in sh.worksheets()]
-    for title in titles:
-        ws = sh.worksheet(title)
+    for t in titles:
+        ws = sh.worksheet(t)
         data = ws.get_all_records()
-        dfs[title] = pd.DataFrame(data).fillna("")
-
-    # Hiển thị debug giúp kiểm tra đúng file
-    st.caption(
-        "Nguồn dữ liệu: **Google Sheets** • "
-        f"Worksheets: {', '.join(titles) if titles else '(trống)'}"
-    )
+        dfs[t] = pd.DataFrame(data).fillna("")
+    st.caption("Nguồn dữ liệu: **Google Sheets** • Worksheets: " + (", ".join(titles) if titles else "(trống)"))
     return dfs
+
 
 
 @st.cache_data(show_spinner=False)
