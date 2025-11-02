@@ -358,12 +358,40 @@ with tab2:
 
 with tab3:
     left, right = st.columns([2,1])
+
+    # Map team_id -> team_name để hiển thị đẹp
+    tdf = teams_df.copy(); tdf.columns = [c.strip().lower() for c in tdf.columns]
+    name_map = dict(zip(tdf.get("team_id", pd.Series(dtype=str)),
+                        tdf.get("team_name", pd.Series(dtype=str))))
+
+    # ========= BÊN TRÁI: DANH SÁCH CẦU THỦ =========
     with left:
         st.subheader("Danh sách cầu thủ")
         if players_df.empty:
             st.info("Chưa có dữ liệu 'players'.")
         else:
-            st.dataframe(players_df, use_container_width=True)
+            pdf = players_df.copy()
+            pdf.columns = [c.strip().lower() for c in pdf.columns]
+
+            # Thêm cột 'Đội' theo tên đội
+            pdf["Đội"] = pdf.get("team_id", "").map(name_map).fillna(pdf.get("team_id", ""))
+
+            # Chọn & đổi tên cột sang tiếng Việt
+            cols = [c for c in [
+                "player_id","player_name","Đội","shirt_number","position","dob","nationality","is_registered"
+            ] if c in pdf.columns]
+            display_players = pdf[cols].rename(columns={
+                "player_id": "Mã cầu thủ",
+                "player_name": "Cầu thủ",
+                "shirt_number": "Số áo",
+                "position": "Vị trí",
+                "dob": "Ngày sinh",
+                "nationality": "Quốc tịch",
+                "is_registered": "Đã đăng ký"
+            })
+            st.dataframe(display_players, use_container_width=True)
+
+    # ========= BÊN PHẢI: THỐNG KÊ =========
     with right:
         st.subheader("Thống kê ghi bàn / thẻ")
         if events_df.empty:
@@ -371,15 +399,63 @@ with tab3:
         else:
             ev = events_df.copy()
             ev.columns = [c.strip().lower() for c in ev.columns]
-            if "event_type" in ev.columns and "player_id" in ev.columns:
-                goals = (ev[ev["event_type"].str.lower() == "goal"]
-                         .groupby("player_id").size().reset_index(name="Goals"))
-                out = players_df.merge(goals, how="left", on="player_id")
-                out["Goals"] = out["Goals"].fillna(0).astype(int)
-                out = out.sort_values("Goals", ascending=False)
-                keep_cols = [c for c in ["player_id","player_name","team_id","number","Goals"] if c in out.columns]
-                st.dataframe(out[keep_cols], use_container_width=True)
+
+            # Chuẩn kiểu để merge an toàn
+            if "player_id" in ev.columns and "player_id" in players_df.columns:
+                ev["player_id"] = ev["player_id"].astype(str)
+                pmini = players_df.copy()
+                pmini.columns = [c.strip().lower() for c in pmini.columns]
+                pmini["player_id"] = pmini["player_id"].astype(str)
+                pmini["Đội"] = pmini.get("team_id", "").map(name_map).fillna(pmini.get("team_id",""))
+
+                # ==== Top ghi bàn ====
+                if "event_type" in ev.columns:
+                    goals = ev[ev["event_type"].str.lower() == "goal"]
+                    if not goals.empty:
+                        top = (goals.groupby("player_id").size()
+                               .reset_index(name="Bàn thắng"))
+                        top = (pmini.merge(top, how="right", on="player_id")
+                                     .rename(columns={
+                                         "player_id": "Mã cầu thủ",
+                                         "player_name": "Cầu thủ"
+                                     })
+                               )
+                        top = top[["Mã cầu thủ","Cầu thủ","Đội","Bàn thắng"]].sort_values(
+                            "Bàn thắng", ascending=False
+                        )
+                        st.markdown("**Vua phá lưới (tạm tính)**")
+                        st.dataframe(top, use_container_width=True)
+                    else:
+                        st.info("Chưa có bàn thắng nào.")
+
+                # ==== Thẻ phạt ====
+                card_types = ["yellow","red","second_yellow","yellow_plus_direct_red"]
+                cards = ev[ev.get("event_type","").isin(card_types)]
+                if not cards.empty:
+                    card_pvt = (cards.pivot_table(index="player_id",
+                                                  columns="event_type",
+                                                  aggfunc="size",
+                                                  fill_value=0)
+                                      .reset_index())
+                    card_pvt.columns = [str(c) for c in card_pvt.columns]
+                    card_pvt = pmini.merge(card_pvt, how="right", on="player_id")
+                    # Đổi tên cột thẻ
+                    rename_cards = {
+                        "player_id": "Mã cầu thủ",
+                        "player_name": "Cầu thủ",
+                        "yellow": "Thẻ vàng",
+                        "red": "Thẻ đỏ",
+                        "second_yellow": "Vàng thứ 2",
+                        "yellow_plus_direct_red": "Vàng + Đỏ trực tiếp"
+                    }
+                    card_pvt = card_pvt.rename(columns=rename_cards)
+                    keep = [c for c in ["Mã cầu thủ","Cầu thủ","Đội",
+                                        "Thẻ vàng","Vàng thứ 2","Thẻ đỏ","Vàng + Đỏ trực tiếp"]
+                            if c in card_pvt.columns]
+                    st.markdown("**Thẻ phạt (tạm tính)**")
+                    st.dataframe(card_pvt[keep].sort_values(
+                        keep[3:] if len(keep) > 3 else keep, ascending=False
+                    ), use_container_width=True)
             else:
                 st.info("Sheet 'events' thiếu cột 'event_type' hoặc 'player_id'.")
 
-st.caption(f"Cập nhật: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
