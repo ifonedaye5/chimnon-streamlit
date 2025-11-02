@@ -1,201 +1,289 @@
-# app.py — Chim Non League Manager (Streamlit + Excel/Google Sheets)
-# ------------------------------------------------------------------
-import os, json
-from dataclasses import dataclass
-from typing import Dict
-import pandas as pd
+# app.py
 import streamlit as st
+import pandas as pd
+import gspread
+from oauth2client.service_account import ServiceAccountCredentials
+from datetime import datetime
 
-# ================= Config & constants =================
-APP_TITLE = "Giải Chim Non Lần 2 — League Manager"
-DATA_FILE = os.getenv("DATA_FILE", "chimnon_template.xlsx")   # fallback Excel
-ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "chimnon2025")
+st.set_page_config(page_title="Giải Chim Non Lần 2 — League Manager", layout="wide")
 
-FAIRPLAY_POINTS = {
-    "yellow": int(os.getenv("FAIRPLAY_YELLOW", 1)),
-    "second_yellow": int(os.getenv("FAIRPLAY_SECOND_YELLOW", 3)),
-    "red": int(os.getenv("FAIRPLAY_RED", 3)),
-    "yellow_plus_direct_red": int(os.getenv("FAIRPLAY_YELLOW_PLUS_DIRECT_RED", 4)),
-}
+# ========== 1) SECRETS ==========
+SECRETS = st.secrets
+DATA_SOURCE = SECRETS.get("DATA_SOURCE", "sheets")
+SHEET_NAME  = SECRETS.get("SHEET_NAME", "chimnon_backend_with_numbers")
+ADMIN_PASSWORD = SECRETS.get("ADMIN_PASSWORD", "")
+SA_INFO = dict(SECRETS.get("gspread_service_account", {}))
+# Ưu tiên lấy SHEET_KEY ở cấp gốc; nếu ai đó lỡ đặt vào block thì fallback
+SHEET_KEY = (SECRETS.get("SHEET_KEY", "") or SA_INFO.get("SHEET_KEY", "")).strip()
 
-# ================= Data loaders =================
-@st.cache_data(show_spinner=False)
-def load_excel(path: str) -> Dict[str, pd.DataFrame]:
-    xls = pd.ExcelFile(path)
-    dfs = {name: xls.parse(name) for name in xls.sheet_names}
-    for k in list(dfs.keys()):
-        dfs[k] = dfs[k].fillna("")
-    return dfs
-
-@st.cache_data(show_spinner=False)
-def load_sheets(sheet_name: str = "", sheet_key: str = "") -> Dict[str, pd.DataFrame]:
-    import gspread
-    from oauth2client.service_account import ServiceAccountCredentials
-    from gspread.exceptions import APIError, SpreadsheetNotFound
-
-    scope = [
-        "https://spreadsheets.google.com/feeds",
-        "https://www.googleapis.com/auth/drive",
+# ========== 2) KẾT NỐI GSPREAD ==========
+@st.cache_resource(show_spinner=False)
+def get_gspread_client():
+    scopes = [
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive.readonly",
+        "https://www.googleapis.com/auth/drive.metadata.readonly",
     ]
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(SA_INFO, scopes=scopes)
+    return gspread.authorize(creds)
 
-    sa_info = dict(st.secrets["gspread_service_account"])
-    creds = ServiceAccountCredentials.from_json_keyfile_dict(sa_info, scope)
-    client = gspread.authorize(creds)
-
+@st.cache_data(show_spinner=False, ttl=120)
+def list_sa_spreadsheets():
     try:
-        files = client.list_spreadsheet_files()
-        if files:
-            dbg = pd.DataFrame(files)
-            st.caption("🔎 SA nhìn thấy các file (name / id):")
-            st.dataframe(dbg[["name", "id"]].head(50), use_container_width=True)
+        client = get_gspread_client()
+        return client.list_spreadsheet_files()
     except Exception as e:
-        st.caption(f"⚠️ Không liệt kê được file: {e}")
+        return [{"name": f"(không lấy được danh sách) — {e}", "id": ""}]
 
+@st.cache_data(show_spinner=True, ttl=60)
+def load_worksheet_df(sheet_key: str, ws_name: str) -> pd.DataFrame:
+    """Đọc 1 worksheet thành DataFrame. Cache theo (sheet_key, ws_name) để tránh UnhashableParamError."""
     try:
-        if sheet_key:
-            sh = client.open_by_key(sheet_key)
-            st.caption(f"✅ Mở bằng KEY: {sheet_key}")
-        else:
-            sh = client.open(sheet_name)
-            st.caption(f"✅ Mở bằng NAME: {sheet_name}")
-    except SpreadsheetNotFound:
-        st.error("❌ Không tìm thấy file. Kiểm tra lại SHEET_KEY/SHEET_NAME và quyền Share cho Service Account.")
-        raise
-    except APIError as e:
-        try:
-            st.error(f"❌ Google APIError: {e.response.status_code} {e.response.reason} — {e.response.text}")
-        except Exception:
-            st.error(f"❌ Google APIError: {e}")
-        raise
+        client = get_gspread_client()
+        sh = client.open_by_key(sheet_key)
+        ws = sh.worksheet(ws_name)
+        rows = ws.get_all_records()
+        return pd.DataFrame(rows)
     except Exception as e:
-        st.error(f"❌ Lỗi mở spreadsheet: {e}")
-        raise
+        # Log nhẹ để biết trạng thái
+        st.info(f"Không đọc được worksheet '{ws_name}': {e}")
+        return pd.DataFrame()
 
-    dfs: Dict[str, pd.DataFrame] = {}
-    titles = [ws.title for ws in sh.worksheets()]
-    for t in titles:
-        ws = sh.worksheet(t)
-        data = ws.get_all_records()
-        dfs[t] = pd.DataFrame(data).fillna("")
-    st.caption("Nguồn dữ liệu: **Google Sheets** • Worksheets: " + (", ".join(titles) if titles else "(trống)"))
-    return dfs
+# ========== 3) TÍNH BXH ==========
 
-
-@st.cache_data(show_spinner=False)
-def load_settings(dfs: Dict[str, pd.DataFrame]) -> Dict[str, str]:
-    if "settings" not in dfs or dfs["settings"].empty:
-        return {}
-    return {str(k): str(v) for k, v in dfs["settings"].iloc[0].to_dict().items()}
-
-@st.cache_data(show_spinner=False)
-def get_ids_map(df: pd.DataFrame, id_col: str, label_col: str) -> Dict[str, str]:
-    if df.empty: return {}
-    return {str(r.get(id_col, "")): str(r.get(label_col, "")) for _, r in df.iterrows()}
-
-def save_excel(path: str, dfs: Dict[str, pd.DataFrame]):
-    with pd.ExcelWriter(path, engine="openpyxl") as writer:
-        for name, df in dfs.items():
-            df.to_excel(writer, index=False, sheet_name=name)
-
-# ================= Fair-play & standings =================
-def compute_fairplay(events: pd.DataFrame) -> Dict[str, int]:
-    points = {}
-    if events.empty: return points
-    for _, e in events.iterrows():
-        team = str(e.get("team_id", "")); etype = str(e.get("event_type", "")).lower()
-        if not team: continue
-        add = 0
-        if etype == "yellow": add = FAIRPLAY_POINTS["yellow"]
-        elif etype == "second_yellow": add = FAIRPLAY_POINTS["second_yellow"]
-        elif etype == "red": add = FAIRPLAY_POINTS["red"]
-        elif etype == "yellow_plus_direct_red": add = FAIRPLAY_POINTS["yellow_plus_direct_red"]
-        points[team] = points.get(team, 0) + add
-    return points
-
-# ================= NEW compute_group_table =================
-def compute_group_table(group_name: str, teams_df: pd.DataFrame, matches_df: pd.DataFrame, events_df: pd.DataFrame) -> pd.DataFrame:
+def compute_fairplay(events_df: pd.DataFrame) -> dict:
     """
-    Tính BXH chuẩn theo điều lệ Thành Dũng 2025:
-    Ưu tiên: Đối đầu -> Hiệu số -> Bàn thắng -> FairPlay
+    Tính điểm Fair-Play theo điều lệ:
+      yellow = 1, second_yellow = 3, red = 3, yellow_plus_direct_red = 4
+    (điểm càng thấp càng tốt)
+    """
+    if events_df is None or events_df.empty:
+        return {}
+    pts = {}
+    for _, e in events_df.iterrows():
+        team = str(e.get("team_id", "")).strip()
+        et  = str(e.get("event_type", "")).strip().lower()
+        if not team:
+            continue
+        add = 0
+        if et == "yellow":
+            add = 1
+        elif et == "second_yellow":
+            add = 3
+        elif et == "red":
+            add = 3
+        elif et == "yellow_plus_direct_red":
+            add = 4
+        pts[team] = pts.get(team, 0) + add
+    return pts
+
+def compute_standings(teams_df: pd.DataFrame, matches_df: pd.DataFrame, events_df: pd.DataFrame=None) -> pd.DataFrame:
+    """
+    BXH theo đúng ưu tiên Điều lệ Thành Dũng:
+      1) Đối đầu trực tiếp
+      2) Hiệu số (GD)
+      3) Bàn thắng (GF)
+      4) Fair-Play (ít hơn xếp trên)
+    Giữ nguyên format cột như bản cũ, có thêm cột FairPlay để minh bạch.
     """
     if teams_df.empty or matches_df.empty:
         return pd.DataFrame()
 
-    teams = teams_df[teams_df["group"].astype(str).str.upper()==str(group_name).upper()].copy()
-    team_ids = teams["team_id"].astype(str).tolist()
-    table = pd.DataFrame({
-        "team_id": team_ids,
-        "team_name": [teams.set_index("team_id").loc[t, "team_name"] if t in teams.set_index("team_id").index else t for t in team_ids],
-        "P": 0, "W": 0, "D": 0, "L": 0, "GF": 0, "GA": 0, "GD": 0, "Pts": 0,
-    }).set_index("team_id")
+    # Chuẩn cột
+    tdf = teams_df.copy()
+    tdf.columns = [c.strip().lower() for c in tdf.columns]
+    mdf = matches_df.copy()
+    mdf.columns = [c.strip().lower() for c in mdf.columns]
 
-    gms = matches_df[
-        (matches_df["group"].astype(str).str.upper()==str(group_name).upper()) &
-        (matches_df["status"].isin(["finished","walkover_home","walkover_away"]))
-    ]
+    needed = {"home_team_id", "away_team_id", "home_goals", "away_goals"}
+    if not needed.issubset(set(mdf.columns)):
+        return pd.DataFrame()
 
-    def as_int(x):
-        try: return int(str(x) or 0)
-        except: return 0
+    # Ép số
+    for c in ["home_goals", "away_goals"]:
+        mdf[c] = pd.to_numeric(mdf[c], errors="coerce").fillna(0).astype(int)
 
-    for _, m in gms.iterrows():
-        h = str(m.get("home_team_id","")); a = str(m.get("away_team_id",""))
-        if h not in table.index or a not in table.index: continue
-        hg, ag = as_int(m.get("home_goals",0)), as_int(m.get("away_goals",0))
-        status = str(m.get("status",""))
-        if status=="walkover_home": hg, ag = 3, 0
-        elif status=="walkover_away": hg, ag = 0, 3
-        table.at[h,"P"] += 1; table.at[a,"P"] += 1
-        table.at[h,"GF"] += hg; table.at[h,"GA"] += ag
-        table.at[a,"GF"] += ag; table.at[a,"GA"] += hg
-        if hg>ag: table.at[h,"W"]+=1; table.at[h,"Pts"]+=3; table.at[a,"L"]+=1
-        elif hg<ag: table.at[a,"W"]+=1; table.at[a,"Pts"]+=3; table.at[h,"L"]+=1
-        else: table.at[h,"D"]+=1; table.at[a,"D"]+=1; table.at[h,"Pts"]+=1; table.at[a,"Pts"]+=1
+    # Bảng điểm thô
+    points, stats = {}, {}
+    def ensure(tid):
+        if tid not in points: points[tid] = 0
+        if tid not in stats:  stats[tid] = {"P":0,"W":0,"D":0,"L":0,"GF":0,"GA":0,"GD":0}
 
-    table["GD"] = table["GF"] - table["GA"]
-    fp = compute_fairplay(events_df)
-    table["FairPlay"] = [fp.get(t, 0) for t in table.index]
+    for _, r in mdf.iterrows():
+        h, a = str(r["home_team_id"]).strip(), str(r["away_team_id"]).strip()
+        hg, ag = int(r["home_goals"]), int(r["away_goals"])
+        ensure(h); ensure(a)
+        stats[h]["P"] += 1; stats[a]["P"] += 1
+        stats[h]["GF"] += hg; stats[h]["GA"] += ag; stats[h]["GD"] = stats[h]["GF"]-stats[h]["GA"]
+        stats[a]["GF"] += ag; stats[a]["GA"] += hg; stats[a]["GD"] = stats[a]["GF"]-stats[a]["GA"]
+        if hg > ag:
+            points[h]+=3; stats[h]["W"]+=1; stats[a]["L"]+=1
+        elif hg < ag:
+            points[a]+=3; stats[a]["W"]+=1; stats[h]["L"]+=1
+        else:
+            points[h]+=1; points[a]+=1; stats[h]["D"]+=1; stats[a]["D"]+=1
 
-    # ---- Hàm phụ: đối đầu trực tiếp ----
-    def head_to_head(t1, t2):
-        subset = gms[
-            ((gms["home_team_id"].astype(str)==t1) & (gms["away_team_id"].astype(str)==t2)) |
-            ((gms["home_team_id"].astype(str)==t2) & (gms["away_team_id"].astype(str)==t1))
-        ]
-        if subset.empty:
+    # Fair-Play
+    fair = compute_fairplay(events_df)
+    # Tạo bảng hiển thị
+    name_col = "team_name" if "team_name" in tdf.columns else ("short_name" if "short_name" in tdf.columns else "team_id")
+    rows = []
+    for _, tr in tdf.iterrows():
+        tid = str(tr.get("team_id", "")).strip()
+        if not tid: 
+            continue
+        s = stats.get(tid, {"P":0,"W":0,"D":0,"L":0,"GF":0,"GA":0,"GD":0})
+        rows.append({
+            "Team ID": tid,
+            "Đội": tr.get(name_col, tid),
+            "Trận": s["P"], "Thắng": s["W"], "Hòa": s["D"], "Thua": s["L"],
+            "BT": s["GF"], "BB": s["GA"], "HS": s["GD"], "Điểm": points.get(tid,0),
+            "FairPlay": fair.get(tid, 0)
+        })
+    df = pd.DataFrame(rows)
+    if df.empty:
+        return df
+
+    # ---- HEAD-TO-HEAD comparator ----
+    from functools import cmp_to_key
+    def head_to_head(t1: str, t2: str) -> int:
+        """Trả về 1 nếu t1 > t2 (t1 xếp trên), -1 nếu t1 < t2, 0 nếu bằng theo đối đầu."""
+        sub = mdf[((mdf["home_team_id"].astype(str)==t1) & (mdf["away_team_id"].astype(str)==t2)) |
+                  ((mdf["home_team_id"].astype(str)==t2) & (mdf["away_team_id"].astype(str)==t1))]
+        if sub.empty:
             return 0
         pts1 = pts2 = gd1 = gd2 = gf1 = gf2 = 0
-        for _, r in subset.iterrows():
-            h, a = str(r["home_team_id"]), str(r["away_team_id"])
-            hg, ag = as_int(r["home_goals"]), as_int(r["away_goals"])
+        for _, m in sub.iterrows():
+            h, a = str(m["home_team_id"]), str(m["away_team_id"])
+            hg, ag = int(m["home_goals"]), int(m["away_goals"])
             if h == t1:
-                gf1 += hg; gf2 += ag; gd1 += hg - ag; gd2 += ag - hg
+                gf1 += hg; gf2 += ag; gd1 += (hg-ag); gd2 += (ag-hg)
                 if hg > ag: pts1 += 3
                 elif hg < ag: pts2 += 3
                 else: pts1 += 1; pts2 += 1
             elif a == t1:
-                gf1 += ag; gf2 += hg; gd1 += ag - hg; gd2 += hg - ag
+                gf1 += ag; gf2 += hg; gd1 += (ag-hg); gd2 += (hg-ag)
                 if ag > hg: pts1 += 3
                 elif ag < hg: pts2 += 3
                 else: pts1 += 1; pts2 += 1
         if pts1 != pts2: return 1 if pts1 > pts2 else -1
-        if gd1 != gd2: return 1 if gd1 > gd2 else -1
-        if gf1 != gf2: return 1 if gf1 > gf2 else -1
+        if gd1  != gd2:  return 1 if gd1  > gd2  else -1
+        if gf1  != gf2:  return 1 if gf1  > gf2  else -1
         return 0
 
-    # ---- So sánh với ưu tiên theo điều lệ ----
-    from functools import cmp_to_key
-    def compare(a, b):
-        hh = head_to_head(a, b)
-        if hh != 0: return -hh  # đối đầu thắng xếp trên
-        gd_diff = table.at[b,"GD"] - table.at[a,"GD"]
-        if gd_diff != 0: return gd_diff
-        gf_diff = table.at[b,"GF"] - table.at[a,"GF"]
-        if gf_diff != 0: return gf_diff
-        fp_diff = table.at[a,"FairPlay"] - table.at[b,"FairPlay"]
-        return fp_diff
+    # Map nhanh chỉ số theo Team ID
+    by_id = df.set_index("Team ID")
 
-    order = sorted(table.index, key=cmp_to_key(compare))
-    table = table.loc[order]
-    table.insert(0, "Hạng", range(1, len(table)+1))
-    return table.reset_index()
+    def cmp(a: str, b: str) -> int:
+        # 1) Đối đầu trực tiếp
+        hh = head_to_head(a, b)
+        if hh != 0:
+            return -hh  # head_to_head trả 1 nghĩa là a tốt hơn -> sort tăng cần đảo dấu
+
+        # 2) Hiệu số GD
+        gd_a, gd_b = by_id.at[a, "HS"], by_id.at[b, "HS"]
+        if gd_a != gd_b:
+            return -1 if gd_a > gd_b else 1
+
+        # 3) Bàn thắng GF
+        gf_a, gf_b = by_id.at[a, "BT"], by_id.at[b, "BT"]
+        if gf_a != gf_b:
+            return -1 if gf_a > gf_b else 1
+
+        # 4) Fair-Play (ít hơn xếp trên)
+        fp_a, fp_b = by_id.at[a, "FairPlay"], by_id.at[b, "FairPlay"]
+        if fp_a != fp_b:
+            return -1 if fp_a < fp_b else 1
+
+        return 0
+
+    # Sắp xếp theo: Điểm (desc) trước rồi mới áp comparator để xử lý tie-break
+    df = df.sort_values(by=["Điểm"], ascending=False).reset_index(drop=True)
+    order = sorted(df["Team ID"].tolist(), key=cmp_to_key(cmp))
+    df = by_id.loc[order].reset_index()
+
+    # Cột Hạng
+    df.insert(0, "Hạng", range(1, len(df)+1))
+    return df
+
+# ========== 4) UI ==========
+st.title("Giải Chim Non Lần 2 — League Manager")
+
+with st.expander("🔐 Kết nối & Debug", expanded=True):
+    if DATA_SOURCE.lower() != "sheets":
+        st.error('DATA_SOURCE không phải "sheets". Kiểm tra Secrets.')
+    else:
+        files = list_sa_spreadsheets()
+        st.write("🔎 **SA nhìn thấy các file (tên / id)**")
+        if files:
+            try:
+                st.dataframe(pd.DataFrame(files)[["name","id"]], use_container_width=True, height=180)
+            except Exception:
+                st.dataframe(pd.DataFrame(files), use_container_width=True, height=180)
+        else:
+            st.info("Service Account chưa thấy file nào. Hãy SHARE file Google Sheet cho email SA với quyền Editor.")
+
+        if not SHEET_KEY:
+            st.error("Chưa có SHEET_KEY trong Secrets (đặt ở cấp gốc, không nằm trong [gspread_service_account]).")
+            st.stop()
+        # Thử mở bằng KEY chỉ để xác nhận; không dùng đối tượng sh cho cache
+        try:
+            _client = get_gspread_client()
+            _client.open_by_key(SHEET_KEY)
+            st.success(f"✅ Mở bằng KEY: {SHEET_KEY}")
+        except Exception as e:
+            st.error(f"❌ Không mở được bằng KEY. Kiểm tra đã share đúng email SA.\n\n{e}")
+            st.stop()
+
+# ========== 5) ĐỌC DỮ LIỆU ==========
+teams_df   = load_worksheet_df(SHEET_KEY, "teams")
+players_df = load_worksheet_df(SHEET_KEY, "players")
+matches_df = load_worksheet_df(SHEET_KEY, "matches")
+events_df  = load_worksheet_df(SHEET_KEY, "events")
+
+# ========== 6) TABS ==========
+tab1, tab2, tab3 = st.tabs(["🏆 Bảng xếp hạng", "📅 Lịch thi đấu", "👤 Cầu thủ & Ghi bàn"])
+
+with tab1:
+    st.subheader("Bảng xếp hạng")
+    if teams_df.empty or matches_df.empty:
+        st.warning("Thiếu sheet 'teams' hoặc 'matches' → chưa thể tính BXH.")
+    else:
+        # ✅ Gọi hàm mới có H2H + GD + GF + FairPlay
+        standings = compute_standings(teams_df, matches_df, events_df)
+        st.dataframe(standings, use_container_width=True)
+
+with tab2:
+    st.subheader("Lịch thi đấu")
+    if matches_df.empty:
+        st.info("Chưa có dữ liệu 'matches'.")
+    else:
+        st.dataframe(matches_df, use_container_width=True)
+
+with tab3:
+    left, right = st.columns([2,1])
+    with left:
+        st.subheader("Danh sách cầu thủ")
+        if players_df.empty:
+            st.info("Chưa có dữ liệu 'players'.")
+        else:
+            st.dataframe(players_df, use_container_width=True)
+    with right:
+        st.subheader("Thống kê ghi bàn / thẻ")
+        if events_df.empty:
+            st.info("Chưa có dữ liệu 'events'.")
+        else:
+            ev = events_df.copy()
+            ev.columns = [c.strip().lower() for c in ev.columns]
+            if "event_type" in ev.columns and "player_id" in ev.columns:
+                goals = (ev[ev["event_type"].str.lower() == "goal"]
+                         .groupby("player_id").size().reset_index(name="Goals"))
+                out = players_df.merge(goals, how="left", on="player_id")
+                out["Goals"] = out["Goals"].fillna(0).astype(int)
+                out = out.sort_values("Goals", ascending=False)
+                keep_cols = [c for c in ["player_id","player_name","team_id","number","Goals"] if c in out.columns]
+                st.dataframe(out[keep_cols], use_container_width=True)
+            else:
+                st.info("Sheet 'events' thiếu cột 'event_type' hoặc 'player_id'.")
+
+st.caption(f"Cập nhật: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
