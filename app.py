@@ -313,31 +313,31 @@ def compute_standings(
 # ========== 4) UI ==========
 st.title("Giải Chim Non Lần 2 — League Manager")
 
-with st.expander("🔐 Kết nối & Debug", expanded=True):
-    if DATA_SOURCE.lower() != "sheets":
-        st.error('DATA_SOURCE không phải "sheets". Kiểm tra Secrets.')
-    else:
-        files = list_sa_spreadsheets()
-        st.write("🔎 **SA nhìn thấy các file (tên / id)**")
-        if files:
-            try:
-                st.dataframe(pd.DataFrame(files)[["name","id"]], use_container_width=True, height=180)
-            except Exception:
-                st.dataframe(pd.DataFrame(files), use_container_width=True, height=180)
-        else:
-            st.info("Service Account chưa thấy file nào. Hãy SHARE file Google Sheet cho email SA với quyền Editor.")
+# with st.expander("🔐 Kết nối & Debug", expanded=True):
+    # if DATA_SOURCE.lower() != "sheets":
+        # st.error('DATA_SOURCE không phải "sheets". Kiểm tra Secrets.')
+    # else:
+        # files = list_sa_spreadsheets()
+        # st.write("🔎 **SA nhìn thấy các file (tên / id)**")
+        # if files:
+            # try:
+                # st.dataframe(pd.DataFrame(files)[["name","id"]], use_container_width=True, height=180)
+            # except Exception:
+                # st.dataframe(pd.DataFrame(files), use_container_width=True, height=180)
+        # else:
+            # st.info("Service Account chưa thấy file nào. Hãy SHARE file Google Sheet cho email SA với quyền Editor.")
 
-        if not SHEET_KEY:
-            st.error("Chưa có SHEET_KEY trong Secrets (đặt ở cấp gốc, không nằm trong [gspread_service_account]).")
-            st.stop()
-        # Thử mở bằng KEY chỉ để xác nhận; không dùng đối tượng sh cho cache
-        try:
-            _client = get_gspread_client()
-            _client.open_by_key(SHEET_KEY)
-            st.success(f"✅ Mở bằng KEY: {SHEET_KEY}")
-        except Exception as e:
-            st.error(f"❌ Không mở được bằng KEY. Kiểm tra đã share đúng email SA.\n\n{e}")
-            st.stop()
+        # if not SHEET_KEY:
+            # st.error("Chưa có SHEET_KEY trong Secrets (đặt ở cấp gốc, không nằm trong [gspread_service_account]).")
+            # st.stop()
+        Thử mở bằng KEY chỉ để xác nhận; không dùng đối tượng sh cho cache
+        # try:
+            # _client = get_gspread_client()
+            # _client.open_by_key(SHEET_KEY)
+            # st.success(f"✅ Mở bằng KEY: {SHEET_KEY}")
+        # except Exception as e:
+            # st.error(f"❌ Không mở được bằng KEY. Kiểm tra đã share đúng email SA.\n\n{e}")
+            # st.stop()
 
 # ========== 5) ĐỌC DỮ LIỆU ==========
 teams_df   = load_worksheet_df(SHEET_KEY, "teams")
