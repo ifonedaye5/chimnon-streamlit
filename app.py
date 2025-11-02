@@ -43,16 +43,20 @@ def list_sa_spreadsheets(_client):
 def open_sheet_by_key(_client, key: str):
     return _client.open_by_key(key)
 
-@st.cache_data(show_spinner=True, ttl=60)
-def load_worksheet_df(sh, ws_name: str) -> pd.DataFrame:
+@@st.cache_data(show_spinner=True, ttl=60)
+def load_worksheet_df(sheet_key: str, ws_name: str) -> pd.DataFrame:
+    """Cache theo (sheet_key, ws_name) để tránh UnhashableParamError."""
     try:
+        gc = get_gspread_client()           # resource đã cache sẵn
+        sh = gc.open_by_key(sheet_key)      # mở lại theo key (nhanh)
         ws = sh.worksheet(ws_name)
         rows = ws.get_all_records()
-        df = pd.DataFrame(rows)
-        return df
-    except Exception:
-        # Nếu không có sheet này thì trả DataFrame rỗng
+        return pd.DataFrame(rows)
+    except Exception as e:
+        # Có thể log nhẹ để biết thiếu sheet/cột
+        st.info(f"Không đọc được worksheet '{ws_name}': {e}")
         return pd.DataFrame()
+
 
 # =========================
 # 3) Tính toán BXH từ matches + events
@@ -172,10 +176,11 @@ with st.expander("🔐 Kết nối & Debug", expanded=True):
 # =========================
 # 5) Đọc dữ liệu các worksheet
 # =========================
-teams_df   = load_worksheet_df(sh, "teams")
-players_df = load_worksheet_df(sh, "players")
-matches_df = load_worksheet_df(sh, "matches")
-events_df  = load_worksheet_df(sh, "events")
+teams_df   = load_worksheet_df(SHEET_KEY, "teams")
+players_df = load_worksheet_df(SHEET_KEY, "players")
+matches_df = load_worksheet_df(SHEET_KEY, "matches")
+events_df  = load_worksheet_df(SHEET_KEY, "events")
+
 
 # =========================
 # 6) Tabs chính
@@ -227,3 +232,4 @@ with tab3:
                 st.info("Sheet 'events' thiếu cột 'event_type' hoặc 'player_id'.")
 
 st.caption(f"Cập nhật: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+
