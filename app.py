@@ -284,7 +284,7 @@ with tab2:
     if matches_df.empty:
         st.info("Chưa có dữ liệu 'matches'.")
     else:
-        # Chuẩn hoá tên cột
+        # Chuẩn hoá cột
         tdf = teams_df.copy();  tdf.columns = [c.strip().lower() for c in tdf.columns]
         mdf = matches_df.copy(); mdf.columns = [c.strip().lower() for c in mdf.columns]
 
@@ -294,41 +294,65 @@ with tab2:
         mdf["Đội chủ nhà"] = mdf["home_team_id"].map(name_map).fillna(mdf["home_team_id"])
         mdf["Đội khách"]   = mdf["away_team_id"].map(name_map).fillna(mdf["away_team_id"])
 
-        # Bộ lọc nhanh
-        col1, col2 = st.columns(2)
+        # Bộ lọc
+        col1, col2, col3 = st.columns([1,1,1.2])
         with col1:
             grp = st.selectbox("Chọn bảng", ["Tất cả", "A", "B"])
         with col2:
-            rounds = sorted(pd.Series(mdf.get("round", [])).dropna().unique().tolist())
-            rnd = st.selectbox("Chọn vòng", ["Tất cả"] + rounds)
+            view_mode = st.selectbox("Chế độ hiển thị", ["Tách theo vòng", "Gộp tất cả"])
+        with col3:
+            # Khi ở chế độ "Gộp tất cả" mới cho lọc một vòng riêng
+            rounds_all = sorted(pd.Series(mdf.get("round", [])).dropna().unique().tolist())
+            rnd = st.selectbox("Chọn vòng", ["Tất cả"] + rounds_all)
 
+        # Áp bộ lọc dữ liệu nền
         show = mdf.copy()
         if grp != "Tất cả":
             show = show[show.get("group", "").astype(str).str.upper() == grp]
-        if rnd != "Tất cả":
+        if view_mode == "Gộp tất cả" and rnd != "Tất cả":
             show = show[show.get("round", "") == rnd]
 
-        # Chọn và đổi tên cột sang tiếng Việt
-        cols = [
-            "match_id","stage","group","round","date","time","venue",
-            "Đội chủ nhà","Đội khách","home_goals","away_goals","status","notes"
-        ]
-        cols = [c for c in cols if c in show.columns]
-        display_df = show[cols].rename(columns={
-            "match_id": "Mã trận",
-            "stage": "Giai đoạn",
-            "group": "Bảng",
-            "round": "Vòng",
-            "date": "Ngày",
-            "time": "Giờ",
-            "venue": "Sân đấu",
-            "home_goals": "BT Chủ nhà",
-            "away_goals": "BT Khách",
-            "status": "Trạng thái",
-            "notes": "Ghi chú"
-        })
+        # Chuẩn các cột hiển thị + header tiếng Việt
+        def beautify(df: pd.DataFrame) -> pd.DataFrame:
+            cols = [
+                "match_id","stage","group","round","date","time","venue",
+                "Đội chủ nhà","Đội khách","home_goals","away_goals","status","notes"
+            ]
+            cols = [c for c in cols if c in df.columns]
+            return df[cols].rename(columns={
+                "match_id": "Mã trận",
+                "stage": "Giai đoạn",
+                "group": "Bảng",
+                "round": "Vòng",
+                "date": "Ngày",
+                "time": "Giờ",
+                "venue": "Sân đấu",
+                "home_goals": "BT Chủ nhà",
+                "away_goals": "BT Khách",
+                "status": "Trạng thái",
+                "notes": "Ghi chú"
+            })
 
-        st.dataframe(display_df, use_container_width=True)
+        # Hiển thị
+        if view_mode == "Tách theo vòng":
+            if show.empty:
+                st.info("Không có trận nào khớp bộ lọc.")
+            else:
+                # Danh sách vòng còn lại sau khi lọc theo bảng
+                rounds = sorted(pd.Series(show.get("round", [])).dropna().unique().tolist())
+                for r in rounds:
+                    sub = show[show.get("round", "") == r].copy()
+                    st.markdown(f"### Vòng {r}")
+                    # Sắp xếp đẹp theo Ngày → Giờ → Sân
+                    if {"date","time","venue"}.issubset(sub.columns):
+                        sub = sub.sort_values(by=["date","time","venue","match_id"])
+                    st.dataframe(beautify(sub), use_container_width=True)
+                    st.divider()
+        else:
+            # Gộp tất cả vào một bảng
+            if {"date","time","venue"}.issubset(show.columns):
+                show = show.sort_values(by=["date","time","venue","match_id"])
+            st.dataframe(beautify(show), use_container_width=True)
 
 
 
