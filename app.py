@@ -618,6 +618,7 @@ with tab3:
                         tdf.get("team_name", pd.Series(dtype=str))))
 
     # ========= BÊN TRÁI: DANH SÁCH CẦU THỦ =========
+    # ========= BÊN TRÁI: DANH SÁCH CẦU THỦ (có lọc) =========
     with left:
         st.subheader("Danh sách cầu thủ")
         if players_df.empty:
@@ -626,14 +627,52 @@ with tab3:
             pdf = players_df.copy()
             pdf.columns = [c.strip().lower() for c in pdf.columns]
 
-            # Thêm cột 'Đội' theo tên đội
+            # Map team_id -> team_name (dùng lại name_map đã tạo phía trên tab3)
+            # name_map được tạo ngay trước đó:
+            # name_map = dict(zip(tdf.get("team_id", pd.Series(dtype=str)),
+            #                     tdf.get("team_name", pd.Series(dtype=str))))
             pdf["Đội"] = pdf.get("team_id", "").map(name_map).fillna(pdf.get("team_id", ""))
+
+            # ==== Bộ lọc ====
+            colf1, colf2 = st.columns([1.2, 1])
+            with colf1:
+                team_options = ["Tất cả"] + sorted(
+                    [n for n in set(name_map.values()) if isinstance(n, str)]
+                )
+                team_pick = st.selectbox("Lọc theo đội", team_options, index=0)
+            with colf2:
+                q = st.text_input("Tìm tên / số áo", "")
+
+            show = pdf.copy()
+
+            # Lọc theo đội
+            if team_pick != "Tất cả":
+                show = show[show["Đội"] == team_pick]
+
+            # Tìm nhanh theo tên, số áo, mã cầu thủ
+            if q.strip():
+                qq = q.strip().lower()
+                def s(col):  # helper an toàn
+                    return show.get(col, pd.Series(dtype=str)).astype(str).str.lower()
+                mask = (
+                    s("player_name").str.contains(qq, na=False) |
+                    s("shirt_number").str.contains(qq, na=False) |
+                    s("player_id").str.contains(qq, na=False)
+                )
+                show = show[mask]
+
+            # Sắp xếp mặc định theo Đội -> Số áo (nếu có)
+            if "shirt_number" in show.columns:
+                show["__shirt_num__"] = pd.to_numeric(show["shirt_number"], errors="coerce")
+                show = show.sort_values(by=["Đội", "__shirt_num__", "player_name"], na_position="last")
+            else:
+                show = show.sort_values(by=["Đội", "player_name"])
 
             # Chọn & đổi tên cột sang tiếng Việt
             cols = [c for c in [
                 "player_id","player_name","Đội","shirt_number","position","dob","nationality","is_registered"
-            ] if c in pdf.columns]
-            display_players = pdf[cols].rename(columns={
+            ] if c in show.columns]
+            display_players = show[cols].rename(columns={
                 "player_id": "Mã cầu thủ",
                 "player_name": "Cầu thủ",
                 "shirt_number": "Số áo",
@@ -642,7 +681,10 @@ with tab3:
                 "nationality": "Quốc tịch",
                 "is_registered": "Đã đăng ký"
             })
-            st.dataframe(display_players, use_container_width=True)
+
+            st.dataframe(display_players.drop(columns=[c for c in ["__shirt_num__"] if c in display_players.columns]),
+                         use_container_width=True)
+
 
     # ========= BÊN PHẢI: THỐNG KÊ =========
     with right:
