@@ -723,34 +723,85 @@ with tab3:
                     else:
                         st.info("Chưa có bàn thắng nào.")
 
-                # ==== Thẻ phạt ====
+                                # ==== Thẻ phạt + TIỀN PHẠT theo đội ====
                 card_types = ["yellow","red","second_yellow","yellow_plus_direct_red"]
                 cards = ev[ev.get("event_type","").isin(card_types)]
                 if not cards.empty:
+                    # Pivot đếm số thẻ / cầu thủ
                     card_pvt = (cards.pivot_table(index="player_id",
                                                   columns="event_type",
                                                   aggfunc="size",
                                                   fill_value=0)
                                       .reset_index())
                     card_pvt.columns = [str(c) for c in card_pvt.columns]
+
+                    # Merge thông tin cầu thủ + tên đội
                     card_pvt = pmini.merge(card_pvt, how="right", on="player_id")
-                    # Đổi tên cột thẻ
+
+                    # ----- CẤU HÌNH MỨC PHẠT (đ đơn vị: đồng) -----
+                    FINE_YELLOW = 200_000                # thẻ vàng
+                    FINE_SECOND_YELLOW = 300_000         # thẻ đỏ gián tiếp (2 vàng)
+                    FINE_RED = 500_000                   # thẻ đỏ trực tiếp
+                    # TH NOTE: 'yellow_plus_direct_red' không nêu trong điều lệ tiền phạt.
+                    # Ở đây mình giả định = Vàng (200k) + Đỏ trực tiếp (500k) = 700k.
+                    # Nếu bạn muốn = 500k thôi, đổi FINE_YPR = 500_000 là xong.
+                    FINE_YPR = 700_000                   # vàng + đỏ trực tiếp (giả định)
+
+                    # Bảo vệ cột có thể thiếu
+                    for c in ["yellow","second_yellow","red","yellow_plus_direct_red"]:
+                        if c not in card_pvt.columns:
+                            card_pvt[c] = 0
+
+                    # Tính tổng tiền phạt cho từng cầu thủ
+                    card_pvt["Tiền phạt"] = (
+                        card_pvt["yellow"] * FINE_YELLOW +
+                        card_pvt["second_yellow"] * FINE_SECOND_YELLOW +
+                        card_pvt["red"] * FINE_RED +
+                        card_pvt["yellow_plus_direct_red"] * FINE_YPR
+                    )
+
+                    # === BỘ LỌC THEO ĐỘI để xem đội phải nộp bao nhiêu ===
+                    teams_list = ["Tất cả"] + sorted(
+                        pd.Series(pmini.get("Đội", [])).dropna().unique().tolist()
+                    )
+                    pick_team = st.selectbox("Lọc thẻ & tiền phạt theo đội", teams_list, key="fine_filter_team")
+
+                    show_fines = card_pvt.copy()
+                    if pick_team != "Tất cả":
+                        show_fines = show_fines[show_fines.get("Đội","") == pick_team]
+
+                    # Tổng tiền phạt của đội (hoặc toàn giải)
+                    total_fine = int(show_fines["Tiền phạt"].sum())
+                    if pick_team != "Tất cả":
+                        st.markdown(f"**Tổng tiền phạt của đội _{pick_team}_:** `{total_fine:,} đ`")
+                    else:
+                        st.markdown(f"**Tổng tiền phạt toàn giải:** `{total_fine:,} đ`")
+
+                    # Đổi tên cột cho bảng chi tiết
                     rename_cards = {
                         "player_id": "Mã cầu thủ",
                         "player_name": "Cầu thủ",
                         "yellow": "Thẻ vàng",
-                        "red": "Thẻ đỏ",
-                        "second_yellow": "Vàng thứ 2",
+                        "red": "Thẻ đỏ trực tiếp",
+                        "second_yellow": "Đỏ gián tiếp (2V)",
                         "yellow_plus_direct_red": "Vàng + Đỏ trực tiếp"
                     }
-                    card_pvt = card_pvt.rename(columns=rename_cards)
-                    keep = [c for c in ["Mã cầu thủ","Cầu thủ","Đội",
-                                        "Thẻ vàng","Vàng thứ 2","Thẻ đỏ","Vàng + Đỏ trực tiếp"]
-                            if c in card_pvt.columns]
-                    st.markdown("**Thẻ phạt (tạm tính)**")
-                    st.dataframe(card_pvt[keep].sort_values(
-                        keep[3:] if len(keep) > 3 else keep, ascending=False
-                    ), use_container_width=True)
-            else:
-                st.info("Sheet 'events' thiếu cột 'event_type' hoặc 'player_id'.")
+                    show_fines = show_fines.rename(columns=rename_cards)
+
+                    keep = [c for c in [
+                        "Mã cầu thủ","Cầu thủ","Đội",
+                        "Thẻ vàng","Đỏ gián tiếp (2V)","Thẻ đỏ trực tiếp","Vàng + Đỏ trực tiếp",
+                        "Tiền phạt"
+                    ] if c in show_fines.columns]
+
+                    # Sắp theo Tiền phạt giảm dần
+                    st.markdown("**Thẻ phạt (tạm tính) & Tiền phạt theo cầu thủ**")
+                    st.dataframe(
+                        show_fines[keep]
+                            .sort_values(by="Tiền phạt", ascending=False),
+                        use_container_width=True
+                    )
+                else:
+                    st.info("Chưa có sự kiện thẻ nào.")
+
 
