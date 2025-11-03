@@ -344,6 +344,7 @@ teams_df   = load_worksheet_df(SHEET_KEY, "teams")
 players_df = load_worksheet_df(SHEET_KEY, "players")
 matches_df = load_worksheet_df(SHEET_KEY, "matches")
 events_df  = load_worksheet_df(SHEET_KEY, "events")
+knockout_df = load_worksheet_df(SHEET_KEY, "knockout")
 
 # ========== 6) TABS ==========
 tab1, tab2, tab3 = st.tabs(["🏆 Bảng xếp hạng", "📅 Lịch thi đấu", "👤 Cầu thủ & Ghi bàn"])
@@ -405,7 +406,7 @@ with tab2:
         if not pdf.empty and "player_id" in pdf.columns:
             for _, r in pdf.iterrows():
                 pid = str(r.get("player_id","")).strip()
-                if not pid: 
+                if not pid:
                     continue
                 pmap[pid] = (
                     r.get("player_name",""),
@@ -422,7 +423,7 @@ with tab2:
         with col1:
             grp = st.selectbox("Chọn bảng", ["Tất cả", "A", "B"])
         with col2:
-            view_mode = st.selectbox("Chế độ hiển thị", ["Tách theo vòng", "Gộp tất cả"])
+            view_mode = st.selectbox("Chế độ hiển thị", ["Tách theo vòng", "Gộp tất cả", "Sơ đồ nhánh (Knockout)"])
         with col3:
             rounds_all = sorted(pd.Series(mdf.get("round", [])).dropna().unique().tolist())
             rnd = st.selectbox("Chọn vòng", ["Tất cả"] + rounds_all)
@@ -510,7 +511,6 @@ with tab2:
 
         # ====== Helpers: dựng danh sách sự kiện theo đội ======
         def format_event_item(ev: dict) -> str:
-            # icon theo loại sự kiện
             et = str(ev.get("event_type","")).lower()
             icon = ""
             if et == "goal":
@@ -527,11 +527,9 @@ with tab2:
             minute = str(ev.get("minute","")).strip()
             pid = str(ev.get("player_id","")).strip()
             pname, shirt, _tid = pmap.get(pid, ("", "", ""))
-            # fallback nếu thiếu tên
             if not pname:
                 pname = ev.get("player_name", pid)
 
-            # hiển thị "số áo. tên (phút)"
             left = f"{shirt}. {pname}".strip(". ").strip()
             right = f"({minute}')" if minute else ""
             return f"<div class='ev-item'>{icon} {left} {right}</div>"
@@ -545,17 +543,14 @@ with tab2:
                 st.info("Thiếu match_id để tra cứu sự kiện.")
                 return
 
-            # Lọc theo match_id
             ev = evdf[evdf["match_id"].astype(str) == str(mid)].copy()
             if ev.empty:
                 st.info("Chưa ghi nhận sự kiện nào.")
                 return
 
-            # Ép kiểu phút để sắp xếp
             ev["__min"] = pd.to_numeric(ev.get("minute"), errors="coerce")
             ev = ev.sort_values(["__min", "event_type"], na_position="last")
 
-            # Chia 2 cột theo đội
             home_id = str(match_row.get("home_team_id",""))
             away_id = str(match_row.get("away_team_id",""))
 
@@ -582,21 +577,239 @@ with tab2:
                         html.append(format_event_item(e))
                     st.markdown("\n".join(html), unsafe_allow_html=True)
 
+        # ====== helpers cho knockout ======
+        def norm_round(val: str) -> str:
+            if not isinstance(val, str):
+                return ""
+            v = val.strip().lower()
+            maps = {
+                "1/8": ["1/8", "vong 1/8", "r16", "round of 16", "16"],
+                "Tứ kết": ["tứ kết", "tu ket", "qf", "quarterfinal", "8"],
+                "Bán kết": ["bán kết", "ban ket", "sf", "semifinal", "4"],
+                "Chung kết": ["chung kết", "chung ket", "final", "f"],
+                "Tranh hạng 3": ["tranh hạng 3", "tranh hang 3", "3rd", "third", "3p", "3rd place"],
+            }
+            for k, arr in maps.items():
+                if v in arr:
+                    return k
+            return val.strip().title()
+
+        def small_card(row: pd.Series) -> str:
+            hg = row.get("home_goals"); ag = row.get("away_goals")
+            try:
+                hg_i = int(hg) if pd.notna(hg) else None
+                ag_i = int(ag) if pd.notna(ag) else None
+            except Exception:
+                hg_i = ag_i = None
+            score_html = f"{hg_i} – {ag_i}" if (hg_i is not None and ag_i is not None) else "vs"
+            date = str(row.get("date","")).strip()
+            time_ = str(row.get("time","")).strip()
+            meta = " • ".join([x for x in [date, time_] if x])
+            return f"""
+            <div style='border:1px solid #e9ecef;border-radius:10px;padding:8px 10px;margin-bottom:8px;background:#fff;'>
+              <div style='display:flex;justify-content:space-between;gap:8px;font-size:14px;'>
+                <div style='flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;'>{row.get("home_name","")}</div>
+                <div style='font-weight:700;'>{score_html}</div>
+                <div style='flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:right;'>{row.get("away_name","")}</div>
+              </div>
+              <div style='text-align:center;color:#6c757d;font-size:12px;margin-top:2px;'>{meta}</div>
+            </div>
+            """
+
         # ====== Hiển thị ======
-        if view_mode == "Tách theo vòng":
+        if view_mode == "Sơ đồ nhánh (Knockout)":
+            # Ưu tiên đọc sheet 'knockout' nếu đã load vào biến toàn cục
+            ko_df = globals().get("knockout_df", pd.DataFrame())
+            # Nếu không có, fallback: lấy từ matches nơi stage không chứa 'vòng bảng'
+            if ko_df.empty:
+                s = show.copy()
+                s_stage = s.get("stage", pd.Series(dtype=str)).astype(str).str.lower()
+                knockout = s[~s_stage.str.contains("vòng bảng|vong bang|group", na=False)].copy()
+                if knockout.empty:
+                    st.info("Chưa có dữ liệu vòng loại trực tiếp (knockout).")
+                else:
+                    knockout["round_norm"] = knockout.get("round","").apply(norm_round)
+                    order = ["1/8","Tứ kết","Bán kết","Chung kết","Tranh hạng 3"]
+                    rounds_present = [r for r in order if r in knockout["round_norm"].unique().tolist()]
+                    if not rounds_present:
+                        rounds_present = sorted(knockout["round_norm"].dropna().unique().tolist())
+                    cols = st.columns(len(rounds_present)) if rounds_present else st.columns(1)
+                    for i, rname in enumerate(rounds_present):
+                        with cols[i]:
+                            st.markdown(f"#### {rname}")
+                            subr = knockout[knockout["round_norm"] == rname].copy()
+                            if {"date","time"}.issubset(subr.columns):
+                                subr = subr.sort_values(by=["date","time","match_id"])
+                            for _, r in subr.iterrows():
+                                st.markdown(small_card(r), unsafe_allow_html=True)
+            else:
+                # Đọc theo cấu hình slot trong sheet 'knockout'
+                ko = ko_df.copy()
+                ko.columns = [c.strip().lower() for c in ko.columns]
+                for c in ["ko_id","round","match_id","slot_home_from","slot_away_from","notes"]:
+                    if c not in ko.columns:
+                        ko[c] = ""
+
+                # Lấy standings hiện thời để resolve A1, B4...
+                slot_to_team = {}
+                try:
+                    stand = compute_standings(teams_df, matches_df, events_df).copy()
+                    stand.columns = [x.strip().lower() for x in stand.columns]
+                    grp_col = "group" if "group" in stand.columns else "bảng"
+                    team_col = "team_name" if "team_name" in stand.columns else ("đội" if "đội" in stand.columns else "team_id")
+                    if "pos" in stand.columns:
+                        pos_col = "pos"
+                    elif "rank" in stand.columns:
+                        pos_col = "rank"
+                    elif "thứ hạng" in stand.columns:
+                        pos_col = "thứ hạng"
+                    else:
+                        stand["pos"] = stand.groupby(grp_col).cumcount()+1
+                        pos_col = "pos"
+                    for _, rr in stand.dropna(subset=[grp_col]).iterrows():
+                        slot_to_team[f"{str(rr[grp_col]).strip().upper()}{int(rr[pos_col])}"] = str(rr[team_col])
+                except Exception:
+                    pass
+
+                mm = mdf.copy()
+                win_by_match, lose_by_match = {}, {}
+                for _, r in mm.iterrows():
+                    mid = str(r.get("match_id","")).strip()
+                    try:
+                        hg = int(r.get("home_goals")); ag = int(r.get("away_goals"))
+                    except Exception:
+                        continue
+                    if not mid or hg == ag:
+                        continue
+                    hname = name_map.get(r.get("home_team_id",""), r.get("home_team_id",""))
+                    aname = name_map.get(r.get("away_team_id",""), r.get("away_team_id",""))
+                    if hg > ag:
+                        win_by_match[mid] = hname; lose_by_match[mid] = aname
+                    else:
+                        win_by_match[mid] = aname; lose_by_match[mid] = hname
+
+                def resolve_slot(s: str) -> str:
+                    s = str(s).strip()
+                    if not s: return ""
+                    S = s.upper()
+                    if len(S) in (2,3) and S[0].isalpha() and S[1:].isdigit():
+                        return slot_to_team.get(S, s)
+                    if S.startswith("WINNER "):
+                        mid = s.split()[-1];  return win_by_match.get(mid, s)
+                    if S.startswith("LOSER "):
+                        mid = s.split()[-1];  return lose_by_match.get(mid, s)
+                    return s
+
+                order = ["1/8","Tứ kết","Bán kết","Chung kết","Tranh hạng 3"]
+                ko["round_norm"] = ko["round"].apply(norm_round)
+                rounds_present = [r for r in order if r in ko["round_norm"].unique().tolist()]
+                if not rounds_present:
+                    rounds_present = sorted(ko["round_norm"].dropna().unique().tolist())
+                cols = st.columns(len(rounds_present)) if rounds_present else st.columns(1)
+                for i, rn in enumerate(rounds_present):
+                    with cols[i]:
+                        st.markdown(f"#### {rn}")
+                        subr = ko[ko["round_norm"] == rn].copy().sort_values(by=["ko_id","match_id"])
+                        for _, rr in subr.iterrows():
+                            # hiển thị theo slot (A1, B4, Winner M201, ...)
+                            home = resolve_slot(rr.get("slot_home_from",""))
+                            away = resolve_slot(rr.get("slot_away_from",""))
+                            # cố lấy tỉ số ở matches nếu có match_id
+                            score_html = "vs"
+                            mid = str(rr.get("match_id","")).strip()
+                            if mid:
+                                got = mdf[mdf.get("match_id","") == mid]
+                                if not got.empty:
+                                    try:
+                                        hg = int(got.iloc[0].get("home_goals")); ag = int(got.iloc[0].get("away_goals"))
+                                        score_html = f"{hg} – {ag}"
+                                    except Exception:
+                                        pass
+                            card_html = f"""
+                            <div style='border:1px solid #e9ecef;border-radius:10px;padding:8px 10px;margin-bottom:8px;background:#fff;'>
+                              <div style='display:flex;justify-content:space-between;gap:8px;font-size:14px;'>
+                                <div style='flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;'>{home}</div>
+                                <div style='font-weight:700;'>{score_html}</div>
+                                <div style='flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:right;'>{away}</div>
+                              </div>
+                              <div style='text-align:center;color:#6c757d;font-size:12px;margin-top:2px;'>
+                                {mid} {rr.get("notes","") or ""}
+                              </div>
+                            </div>
+                            """
+                            st.markdown(card_html, unsafe_allow_html=True)
+
+        elif view_mode == "Tách theo vòng":
             if show.empty:
                 st.info("Không có trận nào khớp bộ lọc.")
             else:
                 rounds = sorted(pd.Series(show.get("round", [])).dropna().unique().tolist())
-                for r in rounds:
-                    sub = show[show.get("round", "") == r].copy()
-                    st.markdown(f"### Vòng {r}")
-                    for _, row in sub.iterrows():
+                if not rounds:
+                    st.info("Không tìm thấy cột hoặc giá trị 'round' — hiển thị gộp tất cả.")
+                    for _, row in show.iterrows():
                         st.markdown(match_card(row), unsafe_allow_html=True)
                         with st.expander(f"Chi tiết trận {row.get('match_id','')}", expanded=False):
                             render_events_for_match(row)
-                
-                    st.divider()
+                else:
+                    for r in rounds:
+                        sub = show[show.get("round", "") == r].copy()
+                        st.markdown(f"### Vòng {r}")
+                        for _, row in sub.iterrows():
+                            st.markdown(match_card(row), unsafe_allow_html=True)
+                            with st.expander(f"Chi tiết trận {row.get('match_id','')}", expanded=False):
+                                render_events_for_match(row)
+
+                        # --- TỔNG HỢP VÒNG ---
+                        sub_calc = sub.copy()
+                        sub_calc["home_goals"] = pd.to_numeric(sub_calc.get("home_goals"), errors="coerce")
+                        sub_calc["away_goals"] = pd.to_numeric(sub_calc.get("away_goals"), errors="coerce")
+                        played = sub_calc.dropna(subset=["home_goals", "away_goals"])
+
+                        n_matches = len(sub)
+                        n_played  = len(played)
+                        gf_home   = int(played["home_goals"].sum()) if n_played else 0
+                        gf_away   = int(played["away_goals"].sum()) if n_played else 0
+                        goals_tot = gf_home + gf_away
+                        avg_goals = (goals_tot / n_played) if n_played else 0.0
+
+                        home_wins = int((played["home_goals"] > played["away_goals"]).sum())
+                        away_wins = int((played["home_goals"] < played["away_goals"]).sum())
+                        draws     = int((played["home_goals"] == played["away_goals"]).sum())
+
+                        yellow = sy = red = ypr = 0
+                        try:
+                            if not evdf.empty and "event_type" in evdf.columns:
+                                mids = sub.get("match_id", pd.Series(dtype=str)).astype(str).unique().tolist()
+                                ev_round = evdf[evdf["match_id"].astype(str).isin(mids)]
+                                if not ev_round.empty:
+                                    ct = ev_round["event_type"].str.lower().value_counts()
+                                    yellow = int(ct.get("yellow", 0))
+                                    sy     = int(ct.get("second_yellow", 0))
+                                    red    = int(ct.get("red", 0))
+                                    ypr    = int(ct.get("yellow_plus_direct_red", 0))
+                        except Exception:
+                            pass
+
+                        import pandas as _pd
+                        summary_df = _pd.DataFrame([
+                            ("Số trận (vòng này)", n_matches),
+                            ("Trận đã có tỉ số", n_played),
+                            ("Tổng bàn thắng", goals_tot),
+                            ("Bàn chủ nhà", gf_home),
+                            ("Bàn đội khách", gf_away),
+                            ("TB bàn/trận", f"{avg_goals:.2f}"),
+                            ("Chủ nhà thắng", home_wins),
+                            ("Đội khách thắng", away_wins),
+                            ("Hòa", draws),
+                            ("Thẻ vàng", yellow),
+                            ("Đỏ gián tiếp (2V)", sy),
+                            ("Đỏ trực tiếp", red),
+                            ("Vàng + Đỏ trực tiếp", ypr),
+                        ], columns=["Chỉ số", f"Vòng {r}"])
+                        st.markdown("**Tổng hợp vòng**")
+                        st.dataframe(summary_df, use_container_width=True, hide_index=True)
+                        st.divider()
+
         else:
             if show.empty:
                 st.info("Không có trận nào khớp bộ lọc.")
@@ -605,6 +818,7 @@ with tab2:
                     st.markdown(match_card(row), unsafe_allow_html=True)
                     with st.expander(f"Chi tiết trận {row.get('match_id','')}", expanded=False):
                         render_events_for_match(row)
+
 
 
 
