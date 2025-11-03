@@ -595,6 +595,62 @@ with tab2:
                         st.markdown(match_card(row), unsafe_allow_html=True)
                         with st.expander(f"Chi tiết trận {row.get('match_id','')}", expanded=False):
                             render_events_for_match(row)
+                        # ====== TỔNG HỢP VÒNG r ======
+        # Chỉ những trận có tỉ số mới tính bàn thắng
+        sub_calc = sub.copy()
+        sub_calc["home_goals"] = pd.to_numeric(sub_calc.get("home_goals"), errors="coerce")
+        sub_calc["away_goals"] = pd.to_numeric(sub_calc.get("away_goals"), errors="coerce")
+        played = sub_calc.dropna(subset=["home_goals", "away_goals"])
+
+        n_matches = len(sub)
+        n_played  = len(played)
+        gf_home   = int(played["home_goals"].sum()) if n_played else 0
+        gf_away   = int(played["away_goals"].sum()) if n_played else 0
+        goals_tot = gf_home + gf_away
+        avg_goals = (goals_tot / n_played) if n_played else 0.0
+
+        home_wins = int((played["home_goals"] > played["away_goals"]).sum())
+        away_wins = int((played["home_goals"] < played["away_goals"]).sum())
+        draws     = int((played["home_goals"] == played["away_goals"]).sum())
+
+        # Thẻ theo vòng (nếu có sheet events)
+        yellow = sy = red = ypr = 0
+        try:
+            if not evdf.empty and "match_id" in evdf.columns:
+                mids = sub.get("match_id", pd.Series(dtype=str)).astype(str).unique().tolist()
+                ev_round = evdf[evdf["match_id"].astype(str).isin(mids)]
+                if not ev_round.empty and "event_type" in ev_round.columns:
+                    ct = ev_round["event_type"].str.lower().value_counts()
+                    yellow = int(ct.get("yellow", 0))
+                    sy     = int(ct.get("second_yellow", 0))
+                    red    = int(ct.get("red", 0))
+                    ypr    = int(ct.get("yellow_plus_direct_red", 0))
+        except Exception:
+            pass
+
+        # Bảng tóm tắt
+        summary_rows = [
+            ("Số trận (vòng này)",      n_matches),
+            ("Trận đã có tỉ số",        n_played),
+            ("Tổng bàn thắng",          goals_tot),
+            ("Bàn chủ nhà",             gf_home),
+            ("Bàn đội khách",           gf_away),
+            ("TB bàn/trận",             f"{avg_goals:.2f}"),
+            ("Chủ nhà thắng",           home_wins),
+            ("Đội khách thắng",         away_wins),
+            ("Hoà",                     draws),
+            ("Thẻ vàng",                yellow),
+            ("Đỏ gián tiếp (2V)",       sy),
+            ("Đỏ trực tiếp",            red),
+            ("Vàng + Đỏ trực tiếp",     ypr),
+        ]
+        import pandas as _pd
+        summary_df = _pd.DataFrame(summary_rows, columns=["Chỉ số", f"Vòng {r}"])
+
+        st.markdown("**Tổng hợp vòng**")
+        st.dataframe(summary_df, use_container_width=True, hide_index=True)
+        # ====== /TỔNG HỢP VÒNG ======
+
                     st.divider()
         else:
             if show.empty:
