@@ -582,8 +582,29 @@ with tab2:
                         html.append(format_event_item(e))
                     st.markdown("\n".join(html), unsafe_allow_html=True)
 
-        
-
+        # ====== Hiển thị ======
+        if view_mode == "Tách theo vòng":
+            if show.empty:
+                st.info("Không có trận nào khớp bộ lọc.")
+            else:
+                rounds = sorted(pd.Series(show.get("round", [])).dropna().unique().tolist())
+                for r in rounds:
+                    sub = show[show.get("round", "") == r].copy()
+                    st.markdown(f"### Vòng {r}")
+                    for _, row in sub.iterrows():
+                        st.markdown(match_card(row), unsafe_allow_html=True)
+                        with st.expander(f"Chi tiết trận {row.get('match_id','')}", expanded=False):
+                            render_events_for_match(row)
+                
+                    st.divider()
+        else:
+            if show.empty:
+                st.info("Không có trận nào khớp bộ lọc.")
+            else:
+                for _, row in show.iterrows():
+                    st.markdown(match_card(row), unsafe_allow_html=True)
+                    with st.expander(f"Chi tiết trận {row.get('match_id','')}", expanded=False):
+                        render_events_for_match(row)
 
 
 
