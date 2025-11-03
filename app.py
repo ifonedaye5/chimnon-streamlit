@@ -391,12 +391,29 @@ with tab2:
         # Chuẩn hoá cột
         tdf = teams_df.copy();  tdf.columns = [c.strip().lower() for c in tdf.columns]
         mdf = matches_df.copy(); mdf.columns = [c.strip().lower() for c in mdf.columns]
+        evdf = events_df.copy(); evdf.columns = [c.strip().lower() for c in evdf.columns]
 
         # Map team_id -> team_name
         name_map = dict(zip(
             tdf.get("team_id", pd.Series(dtype=str)),
             tdf.get("team_name", pd.Series(dtype=str))
         ))
+
+        # Map player_id -> (player_name, shirt_number, team_id)
+        pdf = players_df.copy(); pdf.columns = [c.strip().lower() for c in pdf.columns]
+        pmap = {}
+        if not pdf.empty and "player_id" in pdf.columns:
+            for _, r in pdf.iterrows():
+                pid = str(r.get("player_id","")).strip()
+                if not pid: 
+                    continue
+                pmap[pid] = (
+                    r.get("player_name",""),
+                    r.get("shirt_number",""),
+                    r.get("team_id",""),
+                )
+
+        # Tên đội để hiển thị
         mdf["home_name"] = mdf["home_team_id"].map(name_map).fillna(mdf["home_team_id"])
         mdf["away_name"] = mdf["away_team_id"].map(name_map).fillna(mdf["away_team_id"])
 
@@ -417,7 +434,7 @@ with tab2:
         if view_mode == "Gộp tất cả" and rnd != "Tất cả":
             show = show[show.get("round", "") == rnd]
 
-        # Sắp xếp đẹp theo Ngày → Giờ → Sân → match_id (nếu có đủ cột)
+        # Sắp xếp đẹp
         if {"date","time","venue"}.issubset(show.columns):
             show = show.sort_values(by=["date","time","venue","match_id"])
 
@@ -425,27 +442,19 @@ with tab2:
         st.markdown("""
         <style>
         .match-card{
-            padding: 10px 14px;
-            border-radius: 12px;
-            border: 1px solid #e9ecef;
-            background: #fff;
-            margin-bottom: 8px;
+            padding: 10px 14px; border-radius: 12px; border: 1px solid #e9ecef;
+            background: #fff; margin-bottom: 8px;
         }
         .match-row{
             display:flex; align-items:center; justify-content:space-between;
             gap: 12px; font-size:18px; line-height:1.35;
         }
         .team{
-            flex: 1 1 40%;
-            display:flex; align-items:center; gap:8px; font-weight:600;
+            flex: 1 1 40%; display:flex; align-items:center; gap:8px; font-weight:600;
             white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
         }
-        .score{
-            flex: 0 0 auto; font-weight:800; min-width:80px; text-align:center;
-        }
-        .sub{
-            color:#6c757d; font-size:12.5px; margin-top:4px; text-align:center;
-        }
+        .score{ flex: 0 0 auto; font-weight:800; min-width:80px; text-align:center; }
+        .sub{ color:#6c757d; font-size:12.5px; margin-top:4px; text-align:center; }
         .status-badge{
             display:inline-block; padding:2px 8px; border-radius:999px; font-size:12px;
             border:1px solid #dee2e6; margin-left:6px;
@@ -453,6 +462,8 @@ with tab2:
         .status-finished{ background:#ecfdf5; border-color:#bbf7d0; color:#065f46;}
         .status-scheduled{ background:#eff6ff; border-color:#bfdbfe; color:#1e3a8a;}
         .status-live{ background:#fff7ed; border-color:#fed7aa; color:#9a3412;}
+        .ev-head{ font-weight:700; margin:6px 0 4px 0; }
+        .ev-item{ margin:0 0 2px 0; }
         </style>
         """, unsafe_allow_html=True)
 
@@ -473,20 +484,17 @@ with tab2:
             away = str(row.get("away_name","")).strip()
             hg = row.get("home_goals", None)
             ag = row.get("away_goals", None)
-            # hiển thị tỉ số nếu đã có số; nếu chưa, hiện “vs”
             try:
                 hg_i = int(hg) if pd.notna(hg) else None
                 ag_i = int(ag) if pd.notna(ag) else None
             except Exception:
                 hg_i = ag_i = None
-
             score_html = f"{hg_i} – {ag_i}" if (hg_i is not None and ag_i is not None) else "vs"
 
             date = str(row.get("date","")).strip()
             time_ = str(row.get("time","")).strip()
             venue = str(row.get("venue","")).strip()
             meta = " • ".join([x for x in [date, time_, venue] if x])
-
             status_html = render_status_badge(str(row.get("status","")).strip())
 
             return f"""
@@ -500,6 +508,80 @@ with tab2:
             </div>
             """
 
+        # ====== Helpers: dựng danh sách sự kiện theo đội ======
+        def format_event_item(ev: dict) -> str:
+            # icon theo loại sự kiện
+            et = str(ev.get("event_type","")).lower()
+            icon = ""
+            if et == "goal":
+                icon = "⚽"
+            elif et in {"yellow", "yellow_card"}:
+                icon = "🟨"
+            elif et in {"red", "red_card"}:
+                icon = "🟥"
+            elif et in {"second_yellow"}:
+                icon = "🟨🟨"
+            elif et in {"yellow_plus_direct_red"}:
+                icon = "🟨➕🟥"
+
+            minute = str(ev.get("minute","")).strip()
+            pid = str(ev.get("player_id","")).strip()
+            pname, shirt, _tid = pmap.get(pid, ("", "", ""))
+            # fallback nếu thiếu tên
+            if not pname:
+                pname = ev.get("player_name", pid)
+
+            # hiển thị "số áo. tên (phút)"
+            left = f"{shirt}. {pname}".strip(". ").strip()
+            right = f"({minute}')" if minute else ""
+            return f"<div class='ev-item'>{icon} {left} {right}</div>"
+
+        def render_events_for_match(match_row: pd.Series):
+            if evdf.empty or "match_id" not in evdf.columns:
+                st.info("Chưa có dữ liệu sự kiện cho trận này.")
+                return
+            mid = match_row.get("match_id", "")
+            if not mid:
+                st.info("Thiếu match_id để tra cứu sự kiện.")
+                return
+
+            # Lọc theo match_id
+            ev = evdf[evdf["match_id"].astype(str) == str(mid)].copy()
+            if ev.empty:
+                st.info("Chưa ghi nhận sự kiện nào.")
+                return
+
+            # Ép kiểu phút để sắp xếp
+            ev["__min"] = pd.to_numeric(ev.get("minute"), errors="coerce")
+            ev = ev.sort_values(["__min", "event_type"], na_position="last")
+
+            # Chia 2 cột theo đội
+            home_id = str(match_row.get("home_team_id",""))
+            away_id = str(match_row.get("away_team_id",""))
+
+            colL, colR = st.columns(2)
+            with colL:
+                st.markdown(f"**{match_row.get('home_name','')}**")
+                home_ev = ev[ev.get("team_id","").astype(str) == home_id]
+                if home_ev.empty:
+                    st.write("—")
+                else:
+                    html = ["<div class='ev-head'>Sự kiện</div>"]
+                    for _, e in home_ev.iterrows():
+                        html.append(format_event_item(e))
+                    st.markdown("\n".join(html), unsafe_allow_html=True)
+
+            with colR:
+                st.markdown(f"**{match_row.get('away_name','')}**")
+                away_ev = ev[ev.get("team_id","").astype(str) == away_id]
+                if away_ev.empty:
+                    st.write("—")
+                else:
+                    html = ["<div class='ev-head'>Sự kiện</div>"]
+                    for _, e in away_ev.iterrows():
+                        html.append(format_event_item(e))
+                    st.markdown("\n".join(html), unsafe_allow_html=True)
+
         # ====== Hiển thị ======
         if view_mode == "Tách theo vòng":
             if show.empty:
@@ -511,14 +593,18 @@ with tab2:
                     st.markdown(f"### Vòng {r}")
                     for _, row in sub.iterrows():
                         st.markdown(match_card(row), unsafe_allow_html=True)
+                        with st.expander(f"Chi tiết trận {row.get('match_id','')}", expanded=False):
+                            render_events_for_match(row)
                     st.divider()
         else:
-            # Gộp tất cả vào một danh sách thẻ
             if show.empty:
                 st.info("Không có trận nào khớp bộ lọc.")
             else:
                 for _, row in show.iterrows():
                     st.markdown(match_card(row), unsafe_allow_html=True)
+                    with st.expander(f"Chi tiết trận {row.get('match_id','')}", expanded=False):
+                        render_events_for_match(row)
+
 
 
 
