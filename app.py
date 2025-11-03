@@ -393,19 +393,20 @@ with tab2:
         mdf = matches_df.copy(); mdf.columns = [c.strip().lower() for c in mdf.columns]
 
         # Map team_id -> team_name
-        name_map = dict(zip(tdf.get("team_id", pd.Series(dtype=str)),
-                            tdf.get("team_name", pd.Series(dtype=str))))
-        mdf["Đội chủ nhà"] = mdf["home_team_id"].map(name_map).fillna(mdf["home_team_id"])
-        mdf["Đội khách"]   = mdf["away_team_id"].map(name_map).fillna(mdf["away_team_id"])
+        name_map = dict(zip(
+            tdf.get("team_id", pd.Series(dtype=str)),
+            tdf.get("team_name", pd.Series(dtype=str))
+        ))
+        mdf["home_name"] = mdf["home_team_id"].map(name_map).fillna(mdf["home_team_id"])
+        mdf["away_name"] = mdf["away_team_id"].map(name_map).fillna(mdf["away_team_id"])
 
-        # Bộ lọc
+        # ====== Bộ lọc ======
         col1, col2, col3 = st.columns([1,1,1.2])
         with col1:
             grp = st.selectbox("Chọn bảng", ["Tất cả", "A", "B"])
         with col2:
             view_mode = st.selectbox("Chế độ hiển thị", ["Tách theo vòng", "Gộp tất cả"])
         with col3:
-            # Khi ở chế độ "Gộp tất cả" mới cho lọc một vòng riêng
             rounds_all = sorted(pd.Series(mdf.get("round", [])).dropna().unique().tolist())
             rnd = st.selectbox("Chọn vòng", ["Tất cả"] + rounds_all)
 
@@ -416,47 +417,109 @@ with tab2:
         if view_mode == "Gộp tất cả" and rnd != "Tất cả":
             show = show[show.get("round", "") == rnd]
 
-        # Chuẩn các cột hiển thị + header tiếng Việt
-        def beautify(df: pd.DataFrame) -> pd.DataFrame:
-            cols = [
-                "match_id","stage","group","round","date","time","venue",
-                "Đội chủ nhà","Đội khách","home_goals","away_goals","status","notes"
-            ]
-            cols = [c for c in cols if c in df.columns]
-            return df[cols].rename(columns={
-                "match_id": "Mã trận",
-                "stage": "Giai đoạn",
-                "group": "Bảng",
-                "round": "Vòng",
-                "date": "Ngày",
-                "time": "Giờ",
-                "venue": "Sân đấu",
-                "home_goals": "BT Chủ nhà",
-                "away_goals": "BT Khách",
-                "status": "Trạng thái",
-                "notes": "Ghi chú"
-            })
+        # Sắp xếp đẹp theo Ngày → Giờ → Sân → match_id (nếu có đủ cột)
+        if {"date","time","venue"}.issubset(show.columns):
+            show = show.sort_values(by=["date","time","venue","match_id"])
 
-        # Hiển thị
+        # ====== CSS cho “thẻ trận đấu” ======
+        st.markdown("""
+        <style>
+        .match-card{
+            padding: 10px 14px;
+            border-radius: 12px;
+            border: 1px solid #e9ecef;
+            background: #fff;
+            margin-bottom: 8px;
+        }
+        .match-row{
+            display:flex; align-items:center; justify-content:space-between;
+            gap: 12px; font-size:18px; line-height:1.35;
+        }
+        .team{
+            flex: 1 1 40%;
+            display:flex; align-items:center; gap:8px; font-weight:600;
+            white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+        }
+        .score{
+            flex: 0 0 auto; font-weight:800; min-width:80px; text-align:center;
+        }
+        .sub{
+            color:#6c757d; font-size:12.5px; margin-top:4px; text-align:center;
+        }
+        .status-badge{
+            display:inline-block; padding:2px 8px; border-radius:999px; font-size:12px;
+            border:1px solid #dee2e6; margin-left:6px;
+        }
+        .status-finished{ background:#ecfdf5; border-color:#bbf7d0; color:#065f46;}
+        .status-scheduled{ background:#eff6ff; border-color:#bfdbfe; color:#1e3a8a;}
+        .status-live{ background:#fff7ed; border-color:#fed7aa; color:#9a3412;}
+        </style>
+        """, unsafe_allow_html=True)
+
+        def render_status_badge(val: str) -> str:
+            if not isinstance(val, str):
+                return ""
+            v = val.strip().lower()
+            if v in {"finished","kết thúc","ket thuc","done","ft"}:
+                return "<span class='status-badge status-finished'>Finished</span>"
+            if v in {"scheduled","chưa đá","pending"}:
+                return "<span class='status-badge status-scheduled'>Scheduled</span>"
+            if v in {"live","playing"}:
+                return "<span class='status-badge status-live'>Live</span>"
+            return f"<span class='status-badge'>{val}</span>"
+
+        def match_card(row: pd.Series) -> str:
+            home = str(row.get("home_name","")).strip()
+            away = str(row.get("away_name","")).strip()
+            hg = row.get("home_goals", None)
+            ag = row.get("away_goals", None)
+            # hiển thị tỉ số nếu đã có số; nếu chưa, hiện “vs”
+            try:
+                hg_i = int(hg) if pd.notna(hg) else None
+                ag_i = int(ag) if pd.notna(ag) else None
+            except Exception:
+                hg_i = ag_i = None
+
+            score_html = f"{hg_i} – {ag_i}" if (hg_i is not None and ag_i is not None) else "vs"
+
+            date = str(row.get("date","")).strip()
+            time_ = str(row.get("time","")).strip()
+            venue = str(row.get("venue","")).strip()
+            meta = " • ".join([x for x in [date, time_, venue] if x])
+
+            status_html = render_status_badge(str(row.get("status","")).strip())
+
+            return f"""
+            <div class='match-card'>
+              <div class='match-row'>
+                <div class='team' style='justify-content:flex-start;'>{home}</div>
+                <div class='score'>{score_html}</div>
+                <div class='team' style='justify-content:flex-end; text-align:right;'>{away}</div>
+              </div>
+              <div class='sub'>{meta} {status_html}</div>
+            </div>
+            """
+
+        # ====== Hiển thị ======
         if view_mode == "Tách theo vòng":
             if show.empty:
                 st.info("Không có trận nào khớp bộ lọc.")
             else:
-                # Danh sách vòng còn lại sau khi lọc theo bảng
                 rounds = sorted(pd.Series(show.get("round", [])).dropna().unique().tolist())
                 for r in rounds:
                     sub = show[show.get("round", "") == r].copy()
                     st.markdown(f"### Vòng {r}")
-                    # Sắp xếp đẹp theo Ngày → Giờ → Sân
-                    if {"date","time","venue"}.issubset(sub.columns):
-                        sub = sub.sort_values(by=["date","time","venue","match_id"])
-                    st.dataframe(beautify(sub), use_container_width=True)
+                    for _, row in sub.iterrows():
+                        st.markdown(match_card(row), unsafe_allow_html=True)
                     st.divider()
         else:
-            # Gộp tất cả vào một bảng
-            if {"date","time","venue"}.issubset(show.columns):
-                show = show.sort_values(by=["date","time","venue","match_id"])
-            st.dataframe(beautify(show), use_container_width=True)
+            # Gộp tất cả vào một danh sách thẻ
+            if show.empty:
+                st.info("Không có trận nào khớp bộ lọc.")
+            else:
+                for _, row in show.iterrows():
+                    st.markdown(match_card(row), unsafe_allow_html=True)
+
 
 
 
