@@ -347,7 +347,13 @@ events_df  = load_worksheet_df(SHEET_KEY, "events")
 knockout_df = load_worksheet_df(SHEET_KEY, "knockout")
 
 # ========== 6) TABS ==========
-tab1, tab2, tab3 = st.tabs(["🏆 Bảng xếp hạng", "📅 Lịch thi đấu", "👤 Cầu thủ & Ghi bàn"])
+tab1, tab2, tab3, tab_gallery = st.tabs([
+    "🏆 Bảng xếp hạng",
+    "📅 Lịch thi đấu",
+    "👥 Cầu thủ & Ghi bàn",
+    "📸 Ảnh & Highlight"
+])
+
 
 with tab1:
     st.subheader("Bảng xếp hạng")
@@ -1019,4 +1025,97 @@ with tab3:
                 else:
                     st.info("Chưa có sự kiện thẻ nào.")
 
+with tab_gallery:
+    st.subheader("📸 Ảnh & Highlight")
+
+    # ===================== HIGHLIGHTS =====================
+    st.markdown("### 🔥 Highlights & Full match")
+    try:
+        hl_df = load_worksheet_df(SHEET_KEY, "highlights")
+        hl_df.columns = [c.strip().lower() for c in hl_df.columns]
+        required_hl_cols = {"title", "highlight", "full", "download"}
+        if hl_df.empty or not required_hl_cols.issubset(set(hl_df.columns)):
+            st.info("Sheet **highlights** thiếu cột hoặc chưa có dữ liệu. Cần các cột: "
+                    "`title | highlight | full | download` (tùy chọn: `round`, `match_id`).")
+        else:
+            # (tuỳ chọn) bộ lọc vòng hoặc match nếu có
+            fl1, fl2 = st.columns([1,1])
+            with fl1:
+                opt_rounds = sorted([x for x in hl_df.get("round", "").dropna().unique().tolist() if str(x).strip()])
+                round_sel = st.selectbox("Lọc theo vòng (tuỳ chọn)", ["Tất cả"] + opt_rounds) if opt_rounds else "Tất cả"
+            with fl2:
+                opt_matches = sorted([x for x in hl_df.get("match_id", "").dropna().unique().tolist() if str(x).strip()])
+                match_sel = st.selectbox("Lọc theo match (tuỳ chọn)", ["Tất cả"] + opt_matches) if opt_matches else "Tất cả"
+
+            show_hl = hl_df.copy()
+            if round_sel != "Tất cả" and "round" in show_hl.columns:
+                show_hl = show_hl[show_hl["round"].astype(str) == str(round_sel)]
+            if match_sel != "Tất cả" and "match_id" in show_hl.columns:
+                show_hl = show_hl[show_hl["match_id"].astype(str) == str(match_sel)]
+
+            for _, r in show_hl.iterrows():
+                title = str(r.get("title","")).strip()
+                url_hl = str(r.get("highlight","")).strip()
+                url_full = str(r.get("full","")).strip()
+                url_dl = str(r.get("download","")).strip()
+
+                if title:
+                    st.markdown(f"**{title}**")
+                # Nhúng video nếu link YouTube, ngược lại hiển thị link
+                if any(host in url_hl for host in ["youtube.com", "youtu.be"]):
+                    st.video(url_hl)
+                elif url_hl:
+                    st.markdown(f"[Xem highlights]({url_hl})")
+
+                c1, c2, c3 = st.columns(3)
+                with c1:
+                    if url_hl: st.markdown(f"[🔥 Highlights]({url_hl})")
+                with c2:
+                    if url_full: st.markdown(f"[📺 Full match]({url_full})")
+                with c3:
+                    if url_dl: st.markdown(f"[📥 Tải tình huống]({url_dl})")
+                st.divider()
+    except Exception as e:
+        st.error(f"Lỗi đọc sheet 'highlights': {e}")
+
+    # ======================== PHOTOS ======================
+    st.markdown("### 🖼️ Album ảnh")
+    st.caption("Mẹo: Ảnh Google Drive dùng dạng `https://drive.google.com/uc?id=FILE_ID` để hiển thị trực tiếp.")
+
+    try:
+        ph_df = load_worksheet_df(SHEET_KEY, "photos")
+        ph_df.columns = [c.strip().lower() for c in ph_df.columns]
+        if ph_df.empty or "url" not in ph_df.columns:
+            st.info("Sheet **photos** thiếu cột hoặc chưa có dữ liệu. Cần các cột: `url | caption` "
+                    "(tùy chọn: `round`, `match_id`).")
+        else:
+            # (tuỳ chọn) bộ lọc
+            fl3, fl4 = st.columns([1,1])
+            with fl3:
+                opt_rounds_p = sorted([x for x in ph_df.get("round", "").dropna().unique().tolist() if str(x).strip()])
+                round_sel_p = st.selectbox("Lọc ảnh theo vòng (tuỳ chọn)", ["Tất cả"] + opt_rounds_p) if opt_rounds_p else "Tất cả"
+            with fl4:
+                opt_matches_p = sorted([x for x in ph_df.get("match_id", "").dropna().unique().tolist() if str(x).strip()])
+                match_sel_p = st.selectbox("Lọc ảnh theo match (tuỳ chọn)", ["Tất cả"] + opt_matches_p) if opt_matches_p else "Tất cả"
+
+            show_ph = ph_df.copy()
+            if round_sel_p != "Tất cả" and "round" in show_ph.columns:
+                show_ph = show_ph[show_ph["round"].astype(str) == str(round_sel_p)]
+            if match_sel_p != "Tất cả" and "match_id" in show_ph.columns:
+                show_ph = show_ph[show_ph["match_id"].astype(str) == str(match_sel_p)]
+
+            urls = show_ph["url"].fillna("").tolist()
+            caps = show_ph.get("caption", "").fillna("").tolist()
+
+            if not urls:
+                st.info("Chưa có ảnh để hiển thị.")
+            else:
+                cols = st.columns(3)
+                for i, url in enumerate(urls):
+                    if not url: 
+                        continue
+                    with cols[i % 3]:
+                        st.image(url, caption=(caps[i] if i < len(caps) else ""), use_column_width=True)
+    except Exception as e:
+        st.error(f"Lỗi đọc sheet 'photos': {e}")
 
