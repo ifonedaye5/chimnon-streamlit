@@ -375,21 +375,21 @@ with tab1:
                 if "/file/d/" in u:
                     try:
                         fid = u.split("/file/d/")[1].split("/")[0]
-                        return f"https://drive.google.com/uc?export=view&id={fid}"
+                        return f"https://drive.google.com/thumbnail?id={fid}&sz=w64"
                     except Exception:
                         pass
                 # open?id=<ID>
                 if "open?id=" in u:
                     try:
                         fid = u.split("open?id=")[1].split("&")[0]
-                        return f"https://drive.google.com/uc?export=view&id={fid}"
+                        return f"https://drive.google.com/thumbnail?id={fid}&sz=w64"
                     except Exception:
                         pass
                 # uc?id=<ID>
                 if "uc?id=" in u and "export=view" not in u:
                     try:
                         fid = u.split("uc?id=")[1].split("&")[0]
-                        return f"https://drive.google.com/uc?export=view&id={fid}"
+                        return f"https://drive.google.com/thumbnail?id={fid}&sz=w64"
                     except Exception:
                         pass
             return u
@@ -541,19 +541,19 @@ with tab2:
                 if "/file/d/" in u:
                     try:
                         fid = u.split("/file/d/")[1].split("/")[0]
-                        return f"https://drive.google.com/uc?export=view&id={fid}"
+                        return f"https://drive.google.com/thumbnail?id={fid}&sz=w64"
                     except Exception:
                         pass
                 if "open?id=" in u:
                     try:
                         fid = u.split("open?id=")[1].split("&")[0]
-                        return f"https://drive.google.com/uc?export=view&id={fid}"
+                        return f"https://drive.google.com/thumbnail?id={fid}&sz=w64"
                     except Exception:
                         pass
                 if "uc?id=" in u and "export=view" not in u:
                     try:
                         fid = u.split("uc?id=")[1].split("&")[0]
-                        return f"https://drive.google.com/uc?export=view&id={fid}"
+                        return f"https://drive.google.com/thumbnail?id={fid}&sz=w64"
                     except Exception:
                         pass
             return u
