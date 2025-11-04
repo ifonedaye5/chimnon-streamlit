@@ -450,22 +450,30 @@ with tab1:
                 )
 
         else:
+            
             # Gộp lại nhưng có cột 'Bảng' để dễ phân biệt
-            sA = standings_group("A"); sA.insert(1, "Bảng", "A")
-            sB = standings_group("B"); sB.insert(1, "Bảng", "B")
+            sA = standings_group("A").copy(); sA.insert(1, "Bảng", "A")
+            sB = standings_group("B").copy(); sB.insert(1, "Bảng", "B")
             merged = pd.concat([sA, sB], ignore_index=True)
 
-            # ---- Thêm cột logo (map từ team_id sang TEAM_LOGOS) ----
-            if "team_id" in merged.columns:
-                merged["logo"] = merged["team_id"].astype(str).str.strip().map(TEAM_LOGOS)
+            # Chuẩn hóa tên cột về định dạng chung rồi mới map logo
+            merged = merged.rename(columns={
+                "Team ID": "team_id",
+                "Đội": "team_name",
+                "Hạng": "rank"
+            })
 
-                # Đưa cột logo ra ngay trước cột tên đội
+            # Thêm cột logo theo sheet teams
+            if "team_id" in merged.columns:
+                merged["team_id"] = merged["team_id"].astype(str).str.strip()
+                merged["logo"] = merged["team_id"].map(TEAM_LOGOS).fillna("")
+
+                # Đưa cột logo đứng ngay trước tên đội
                 cols = list(merged.columns)
                 if "logo" in cols and "team_name" in cols:
                     cols.insert(cols.index("team_name"), cols.pop(cols.index("logo")))
                     merged = merged[cols]
 
-            # ---- Hiển thị với ảnh logo ----
             st.dataframe(
                 merged,
                 column_config={
@@ -479,6 +487,7 @@ with tab1:
 
 
 
+
 with tab2:
     st.subheader("Lịch thi đấu")
     if matches_df.empty:
@@ -489,12 +498,33 @@ with tab2:
         mdf = matches_df.copy(); mdf.columns = [c.strip().lower() for c in mdf.columns]
         evdf = events_df.copy(); evdf.columns = [c.strip().lower() for c in evdf.columns]
         # Map team_id -> logo_url (nếu có cột logo_url trong sheet teams)
+        def _normalize_drive_url(u: str) -> str:
+            u = str(u or "").strip()
+            if not u:
+                return ""
+            # Chuyển link share Drive về dạng xem trực tiếp
+            if "drive.google.com" in u:
+                # dạng /file/d/<ID>/view
+                if "/file/d/" in u:
+                    try:
+                        fid = u.split("/file/d/")[1].split("/")[0]
+                        return f"https://drive.google.com/uc?id={fid}"
+                    except Exception:
+                        pass
+                # dạng open?id=<ID>
+                if "open?id=" in u:
+                    try:
+                        fid = u.split("open?id=")[1].split("&")[0]
+                        return f"https://drive.google.com/uc?id={fid}"
+                    except Exception:
+                        pass
+            return u  # giữ nguyên nếu không phải link Drive
+
         TEAM_LOGOS = {}
-        if "logo_url" in tdf.columns:
-            TEAM_LOGOS = dict(zip(
-                tdf.get("team_id", pd.Series(dtype=str)).astype(str),
-                tdf.get("logo_url", pd.Series(dtype=str)).fillna("")
-            ))
+        if "logo_url" in tdf.columns and "team_id" in tdf.columns:
+            tid_series = tdf.get("team_id", pd.Series(dtype=str)).astype(str).str.strip()
+            url_series = tdf.get("logo_url", pd.Series(dtype=str)).astype(str).str.strip().apply(_normalize_drive_url)
+            TEAM_LOGOS = dict(zip(tid_series, url_series))
 
 
         # Map team_id -> team_name
