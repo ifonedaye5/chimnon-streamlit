@@ -385,42 +385,70 @@ with tab1:
             c1, c2 = st.columns(2)
             with c1:
                 st.markdown("#### Bảng A")
-                # Thêm cột Logo cho Bảng A (map theo team_id)
-                table_a["logo"] = table_a["team_id"].astype(str).str.strip().map(TEAM_LOGOS)
+                # 1) Tính BXH bảng A
+                table_a = standings_group("A").copy()
 
-                # (tuỳ) Sắp xếp lại thứ tự cột: chèn Logo ngay trước tên đội
+                # 2) Chuẩn hoá tên cột về chuẩn dùng chung
+                table_a = table_a.rename(columns={
+                    "Team ID": "team_id",
+                    "Đội": "team_name",
+                    "Hạng": "rank"
+                })
+
+                # 3) Thêm cột logo từ sheet teams (TEAM_LOGOS đã tạo ở trên)
+                if "team_id" in table_a.columns:
+                    table_a["logo"] = table_a["team_id"].astype(str).str.strip().map(TEAM_LOGOS).fillna("")
+
+                # 4) Đưa cột logo đứng ngay trước tên đội (nếu có)
                 cols_a = list(table_a.columns)
                 if "logo" in cols_a and "team_name" in cols_a:
                     cols_a.insert(cols_a.index("team_name"), cols_a.pop(cols_a.index("logo")))
                     table_a = table_a[cols_a]
 
+                # 5) Hiển thị
                 st.dataframe(
                     table_a,
                     column_config={
-                        "logo": st.column_config.ImageColumn(" ", width="small"),   # cột ảnh nhỏ gọn
-                        "team_name": "Đội"                                          # tên cột tiếng Việt (nếu cần)
+                        "logo": st.column_config.ImageColumn(" ", width="small"),
+                        "team_name": "Đội"
                     },
-                    hide_index=True
+                    hide_index=True,
+                    use_container_width=True
                 )
 
             with c2:
-                # Thêm cột Logo cho Bảng A (map theo team_id)
-                table_b["logo"] = table_b["team_id"].astype(str).str.strip().map(TEAM_LOGOS)
+                st.markdown("#### Bảng B")
+                # 1) Tính BXH bảng B
+                table_b = standings_group("B").copy()
 
-                # (tuỳ) Sắp xếp lại thứ tự cột: chèn Logo ngay trước tên đội
-                cols_a = list(table_b.columns)
-                if "logo" in cols_a and "team_name" in cols_a:
-                    cols_a.insert(cols_a.index("team_name"), cols_a.pop(cols_a.index("logo")))
-                    table_b = table_b[cols_a]
+                # 2) Chuẩn hoá tên cột về chuẩn dùng chung
+                table_b = table_b.rename(columns={
+                    "Team ID": "team_id",
+                    "Đội": "team_name",
+                    "Hạng": "rank"
+                })
 
+                # 3) Thêm cột logo
+                if "team_id" in table_b.columns:
+                    table_b["logo"] = table_b["team_id"].astype(str).str.strip().map(TEAM_LOGOS).fillna("")
+
+                # 4) Đưa cột logo đứng ngay trước tên đội
+                cols_b = list(table_b.columns)
+                if "logo" in cols_b and "team_name" in cols_b:
+                    cols_b.insert(cols_b.index("team_name"), cols_b.pop(cols_b.index("logo")))
+                    table_b = table_b[cols_b]
+
+                # 5) Hiển thị
                 st.dataframe(
                     table_b,
                     column_config={
-                        "logo": st.column_config.ImageColumn(" ", width="small"),   # cột ảnh nhỏ gọn
-                        "team_name": "Đội"                                          # tên cột tiếng Việt (nếu cần)
+                        "logo": st.column_config.ImageColumn(" ", width="small"),
+                        "team_name": "Đội"
                     },
-                    hide_index=True
+                    hide_index=True,
+                    use_container_width=True
                 )
+
         else:
             # Gộp lại nhưng có cột 'Bảng' để dễ phân biệt
             sA = standings_group("A"); sA.insert(1, "Bảng", "A")
