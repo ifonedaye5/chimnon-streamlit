@@ -399,6 +399,14 @@ with tab2:
         tdf = teams_df.copy();  tdf.columns = [c.strip().lower() for c in tdf.columns]
         mdf = matches_df.copy(); mdf.columns = [c.strip().lower() for c in mdf.columns]
         evdf = events_df.copy(); evdf.columns = [c.strip().lower() for c in evdf.columns]
+        # Map team_id -> logo_url (nếu có cột logo_url trong sheet teams)
+        TEAM_LOGOS = {}
+        if "logo_url" in tdf.columns:
+            TEAM_LOGOS = dict(zip(
+                tdf.get("team_id", pd.Series(dtype=str)).astype(str),
+                tdf.get("logo_url", pd.Series(dtype=str)).fillna("")
+            ))
+
 
         # Map team_id -> team_name
         name_map = dict(zip(
@@ -491,6 +499,32 @@ with tab2:
             away = str(row.get("away_name","")).strip()
             hg = row.get("home_goals", None)
             ag = row.get("away_goals", None)
+        # ==== Lấy logo đội bóng ====
+            home_id = str(row.get("home_team_id","")).strip()
+            away_id = str(row.get("away_team_id","")).strip()
+            home_logo = TEAM_LOGOS.get(home_id, "")
+            away_logo = TEAM_LOGOS.get(away_id, "")
+
+            def team_with_logo(name: str, logo_url: str, align_right: bool = False) -> str:
+                """Ghép logo và tên đội bóng"""
+                if not logo_url:
+                    return name
+                if align_right:
+                    return (f"<span style='display:inline-flex;align-items:center;gap:8px;'>"
+                            f"<span>{name}</span>"
+                            f"<img src='{logo_url}' width='22' height='22' "
+                            f"style='object-fit:contain;border-radius:50%;'/>"
+                            f"</span>")
+                else:
+                    return (f"<span style='display:inline-flex;align-items:center;gap:8px;'>"
+                            f"<img src='{logo_url}' width='22' height='22' "
+                            f"style='object-fit:contain;border-radius:50%;'/>"
+                            f"<span>{name}</span>"
+                            f"</span>")
+
+            home_html = team_with_logo(home, home_logo, align_right=False)
+            away_html = team_with_logo(away, away_logo, align_right=True)
+
             try:
                 hg_i = int(hg) if pd.notna(hg) else None
                 ag_i = int(ag) if pd.notna(ag) else None
@@ -507,13 +541,14 @@ with tab2:
             return f"""
             <div class='match-card'>
               <div class='match-row'>
-                <div class='team' style='justify-content:flex-start;'>{home}</div>
+                <div class='team' style='justify-content:flex-start;'>{home_html}</div>
                 <div class='score'>{score_html}</div>
-                <div class='team' style='justify-content:flex-end; text-align:right;'>{away}</div>
+                <div class='team' style='justify-content:flex-end; text-align:right;'>{away_html}</div>
               </div>
               <div class='sub'>{meta} {status_html}</div>
             </div>
             """
+
 
         # ====== Helpers: dựng danh sách sự kiện theo đội ======
         def format_event_item(ev: dict) -> str:
