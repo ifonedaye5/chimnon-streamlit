@@ -311,7 +311,7 @@ def compute_standings(
 
 
 # ========== 4) UI ==========
-st.title("Giải Chim Non Lần 2 — League Manager")
+st.title("⚽ Giải Chim Non Lần 2 — Cup Manager 🏆")
 
 # with st.expander("🔐 Kết nối & Debug", expanded=True):
     # if DATA_SOURCE.lower() != "sheets":
