@@ -5,7 +5,7 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from datetime import datetime
 
-st.set_page_config(page_title="Giải Chim Non Lần 2 — League Manager", layout="wide")
+st.set_page_config(page_title="⚽ Giải Chim Non Lần 2 — Cup Manager 🏆", layout="wide")
 
 # ========== 1) SECRETS ==========
 SECRETS = st.secrets
