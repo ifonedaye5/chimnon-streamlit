@@ -365,21 +365,31 @@ with tab1:
         tdf.columns = [c.strip().lower() for c in tdf.columns]
         # ---- Map team_id -> logo_url (strip để tránh lệch key) ----
      
+        # ---- Map team_id -> logo_url (strip + chuẩn hoá link Google Drive) ----
         def _normalize_drive_url(u: str) -> str:
             u = str(u or "").strip()
             if not u:
                 return ""
             if "drive.google.com" in u:
+                # /file/d/<ID>/view
                 if "/file/d/" in u:
                     try:
                         fid = u.split("/file/d/")[1].split("/")[0]
-                        return f"https://drive.google.com/uc?id={fid}"
+                        return f"https://drive.google.com/uc?export=view&id={fid}"
                     except Exception:
                         pass
+                # open?id=<ID>
                 if "open?id=" in u:
                     try:
                         fid = u.split("open?id=")[1].split("&")[0]
-                        return f"https://drive.google.com/uc?id={fid}"
+                        return f"https://drive.google.com/uc?export=view&id={fid}"
+                    except Exception:
+                        pass
+                # uc?id=<ID>
+                if "uc?id=" in u and "export=view" not in u:
+                    try:
+                        fid = u.split("uc?id=")[1].split("&")[0]
+                        return f"https://drive.google.com/uc?export=view&id={fid}"
                     except Exception:
                         pass
             return u
@@ -391,6 +401,7 @@ with tab1:
                       .astype(str).str.strip()
                       .apply(_normalize_drive_url))
             TEAM_LOGOS = dict(zip(tid, lur))
+
 
 
         mdf = matches_df.copy()
@@ -521,33 +532,39 @@ with tab2:
         mdf = matches_df.copy(); mdf.columns = [c.strip().lower() for c in mdf.columns]
         evdf = events_df.copy(); evdf.columns = [c.strip().lower() for c in evdf.columns]
         # Map team_id -> logo_url (nếu có cột logo_url trong sheet teams)
+        # Map team_id -> logo_url (strip + chuẩn hoá link Google Drive)
         def _normalize_drive_url(u: str) -> str:
             u = str(u or "").strip()
             if not u:
                 return ""
-            # Chuyển link share Drive về dạng xem trực tiếp
             if "drive.google.com" in u:
-                # dạng /file/d/<ID>/view
                 if "/file/d/" in u:
                     try:
                         fid = u.split("/file/d/")[1].split("/")[0]
-                        return f"https://drive.google.com/uc?id={fid}"
+                        return f"https://drive.google.com/uc?export=view&id={fid}"
                     except Exception:
                         pass
-                # dạng open?id=<ID>
                 if "open?id=" in u:
                     try:
                         fid = u.split("open?id=")[1].split("&")[0]
-                        return f"https://drive.google.com/uc?id={fid}"
+                        return f"https://drive.google.com/uc?export=view&id={fid}"
                     except Exception:
                         pass
-            return u  # giữ nguyên nếu không phải link Drive
+                if "uc?id=" in u and "export=view" not in u:
+                    try:
+                        fid = u.split("uc?id=")[1].split("&")[0]
+                        return f"https://drive.google.com/uc?export=view&id={fid}"
+                    except Exception:
+                        pass
+            return u
 
         TEAM_LOGOS = {}
-        if "logo_url" in tdf.columns and "team_id" in tdf.columns:
-            tid_series = tdf.get("team_id", pd.Series(dtype=str)).astype(str).str.strip()
-            url_series = tdf.get("logo_url", pd.Series(dtype=str)).astype(str).str.strip().apply(_normalize_drive_url)
-            TEAM_LOGOS = dict(zip(tid_series, url_series))
+        if "logo_url" in tdf.columns:
+            TEAM_LOGOS = dict(zip(
+                tdf.get("team_id", pd.Series(dtype=str)).astype(str).str.strip(),
+                tdf.get("logo_url", pd.Series(dtype=str)).astype(str).str.strip().apply(_normalize_drive_url)
+            ))
+
 
 
         # Map team_id -> team_name
