@@ -363,6 +363,13 @@ with tab1:
         # Chuẩn hoá tên cột để lọc nhóm
         tdf = teams_df.copy()
         tdf.columns = [c.strip().lower() for c in tdf.columns]
+        # ---- Map team_id -> logo_url (strip để tránh lệch key) ----
+        TEAM_LOGOS = {}
+        if "logo_url" in tdf.columns and "team_id" in tdf.columns:
+            tid = tdf.get("team_id", pd.Series(dtype=str)).astype(str).str.strip()
+            lur = tdf.get("logo_url", pd.Series(dtype=str)).astype(str).str.strip()
+            TEAM_LOGOS = dict(zip(tid, lur))
+
         mdf = matches_df.copy()
         mdf.columns = [c.strip().lower() for c in mdf.columns]
 
@@ -378,16 +385,70 @@ with tab1:
             c1, c2 = st.columns(2)
             with c1:
                 st.markdown("#### Bảng A")
-                st.dataframe(standings_group("A"), use_container_width=True)
+                # Thêm cột Logo cho Bảng A (map theo team_id)
+                table_a["logo"] = table_a["team_id"].astype(str).str.strip().map(TEAM_LOGOS)
+
+                # (tuỳ) Sắp xếp lại thứ tự cột: chèn Logo ngay trước tên đội
+                cols_a = list(table_a.columns)
+                if "logo" in cols_a and "team_name" in cols_a:
+                    cols_a.insert(cols_a.index("team_name"), cols_a.pop(cols_a.index("logo")))
+                    table_a = table_a[cols_a]
+
+                st.dataframe(
+                    table_a,
+                    column_config={
+                        "logo": st.column_config.ImageColumn(" ", width="small"),   # cột ảnh nhỏ gọn
+                        "team_name": "Đội"                                          # tên cột tiếng Việt (nếu cần)
+                    },
+                    hide_index=True
+                )
+
             with c2:
-                st.markdown("#### Bảng B")
-                st.dataframe(standings_group("B"), use_container_width=True)
+                # Thêm cột Logo cho Bảng A (map theo team_id)
+                table_b["logo"] = table_b["team_id"].astype(str).str.strip().map(TEAM_LOGOS)
+
+                # (tuỳ) Sắp xếp lại thứ tự cột: chèn Logo ngay trước tên đội
+                cols_a = list(table_b.columns)
+                if "logo" in cols_a and "team_name" in cols_a:
+                    cols_a.insert(cols_a.index("team_name"), cols_a.pop(cols_a.index("logo")))
+                    table_b = table_b[cols_a]
+
+                st.dataframe(
+                    table_b,
+                    column_config={
+                        "logo": st.column_config.ImageColumn(" ", width="small"),   # cột ảnh nhỏ gọn
+                        "team_name": "Đội"                                          # tên cột tiếng Việt (nếu cần)
+                    },
+                    hide_index=True
+                )
         else:
             # Gộp lại nhưng có cột 'Bảng' để dễ phân biệt
             sA = standings_group("A"); sA.insert(1, "Bảng", "A")
             sB = standings_group("B"); sB.insert(1, "Bảng", "B")
             merged = pd.concat([sA, sB], ignore_index=True)
-            st.dataframe(merged, use_container_width=True)
+
+            # ---- Thêm cột logo (map từ team_id sang TEAM_LOGOS) ----
+            if "team_id" in merged.columns:
+                merged["logo"] = merged["team_id"].astype(str).str.strip().map(TEAM_LOGOS)
+
+                # Đưa cột logo ra ngay trước cột tên đội
+                cols = list(merged.columns)
+                if "logo" in cols and "team_name" in cols:
+                    cols.insert(cols.index("team_name"), cols.pop(cols.index("logo")))
+                    merged = merged[cols]
+
+            # ---- Hiển thị với ảnh logo ----
+            st.dataframe(
+                merged,
+                column_config={
+                    "logo": st.column_config.ImageColumn(" ", width="small"),
+                    "team_name": "Đội",
+                    "Bảng": "Bảng"
+                },
+                use_container_width=True,
+                hide_index=True
+            )
+
 
 
 with tab2:
