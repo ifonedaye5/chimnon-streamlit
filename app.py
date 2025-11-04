@@ -364,11 +364,34 @@ with tab1:
         tdf = teams_df.copy()
         tdf.columns = [c.strip().lower() for c in tdf.columns]
         # ---- Map team_id -> logo_url (strip để tránh lệch key) ----
+     
+        def _normalize_drive_url(u: str) -> str:
+            u = str(u or "").strip()
+            if not u:
+                return ""
+            if "drive.google.com" in u:
+                if "/file/d/" in u:
+                    try:
+                        fid = u.split("/file/d/")[1].split("/")[0]
+                        return f"https://drive.google.com/uc?id={fid}"
+                    except Exception:
+                        pass
+                if "open?id=" in u:
+                    try:
+                        fid = u.split("open?id=")[1].split("&")[0]
+                        return f"https://drive.google.com/uc?id={fid}"
+                    except Exception:
+                        pass
+            return u
+
         TEAM_LOGOS = {}
         if "logo_url" in tdf.columns and "team_id" in tdf.columns:
             tid = tdf.get("team_id", pd.Series(dtype=str)).astype(str).str.strip()
-            lur = tdf.get("logo_url", pd.Series(dtype=str)).astype(str).str.strip()
+            lur = (tdf.get("logo_url", pd.Series(dtype=str))
+                      .astype(str).str.strip()
+                      .apply(_normalize_drive_url))
             TEAM_LOGOS = dict(zip(tid, lur))
+
 
         mdf = matches_df.copy()
         mdf.columns = [c.strip().lower() for c in mdf.columns]
