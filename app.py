@@ -7,6 +7,23 @@ from datetime import datetime
 
 st.set_page_config(page_title="⚽ Giải Chim Non Lần 2 — Cup Manager 🏆", layout="wide")
 
+# === BACKGROUND: toàn trang (mờ) ===
+BACKGROUND_URL = "https://drive.google.com/uc?id=1H_06y2X9Vdleg6-VqsWebWF353Gfe21U"
+
+st.markdown(f"""
+<style>
+/* Phủ ảnh nền toàn trang, làm mờ bằng lớp trắng 0.88 */
+.stApp {{
+  background: 
+    linear-gradient(rgba(255,255,255,0.88), rgba(255,255,255,0.88)),
+    url('{BACKGROUND_URL}') center top / cover no-repeat fixed;
+}}
+/* Thu gọn khoảng trắng phần nội dung */
+.block-container {{ padding-top: 1.2rem; }}
+</style>
+""", unsafe_allow_html=True)
+
+
 # ========== 1) SECRETS ==========
 SECRETS = st.secrets
 DATA_SOURCE = SECRETS.get("DATA_SOURCE", "sheets")
