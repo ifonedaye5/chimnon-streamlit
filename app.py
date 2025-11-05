@@ -7,35 +7,54 @@ from datetime import datetime
 
 st.set_page_config(page_title="⚽ Giải Chim Non Lần 2 — Cup Manager 🏆", layout="wide")
 
-# === BACKGROUND nền chìm toàn trang (chuẩn) ===
-BACKGROUND_URL = "https://drive.google.com/uc?id=1H_06y2X9Vdleg6-VqsWebWF353Gfe21U"
+# === BACKGROUND nền chìm toàn trang: phương án chắc chắn ===
+BG_URL = "https://drive.google.com/uc?id=1H_06y2X9Vdleg6-VqsWebWF353Gfe21U"
 
 st.markdown(f"""
 <style>
-/* 1) Bỏ nền mặc định của vùng nội dung để nhìn thấy ảnh phía sau */
+/* Đảm bảo root cao full để nền phủ đúng */
+html, body, .stApp {{
+  height: 100%;
+}}
+
+/* Bỏ nền trắng mặc định của vùng nội dung để nhìn thấy ảnh phía sau */
 [data-testid="stAppViewContainer"] {{
   background: transparent !important;
 }}
 
-/* 2) Phủ ảnh nền dưới toàn bộ app bằng pseudo-element (không che nội dung) */
-.stApp::before {{
-  content: "";
+/* Phần tử nền cố định phủ toàn màn hình, nằm dưới mọi nội dung */
+#global-bg-holder {{
   position: fixed;
-  inset: 0;                      /* top:0; right:0; bottom:0; left:0 */
-  background: url('{BACKGROUND_URL}') center/cover no-repeat fixed;
-  opacity: 0.18;                 /* Độ mờ ảnh nền. Gợi ý: 0.12–0.25 */
-  z-index: -1;                   /* Đẩy xuống dưới mọi nội dung */
+  inset: 0;               /* top:0; right:0; bottom:0; left:0 */
+  z-index: -1;            /* cho xuống dưới toàn bộ app */
+}}
+
+/* Dùng ::before để vẽ background lên holder */
+#global-bg-holder::before {{
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: url('{BG_URL}');
+  background-size: cover;
+  background-position: center;
+  background-attachment: fixed;  /* hiệu ứng parallax mượt */
+  background-repeat: no-repeat;
+  opacity: 0.18;                 /* Độ mờ (0.12–0.25 đẹp) */
   filter: saturate(110%) contrast(105%);
 }}
 
-/* 3) Giữ header dễ đọc khi lướt */
+/* Giữ header dễ đọc */
 [data-testid="stHeader"] {{
   background: rgba(255,255,255,0.82) !important;
   backdrop-filter: blur(4px);
   border-bottom: 1px solid rgba(0,0,0,0.05);
 }}
 </style>
+
+<!-- Phần tử nền đứng độc lập, fixed toàn trang -->
+<div id="global-bg-holder"></div>
 """, unsafe_allow_html=True)
+
 
 
 
