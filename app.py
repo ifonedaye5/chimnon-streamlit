@@ -7,53 +7,36 @@ from datetime import datetime
 
 st.set_page_config(page_title="⚽ Giải Chim Non Lần 2 — Cup Manager 🏆", layout="wide")
 
-# === BACKGROUND nền chìm toàn trang: phương án chắc chắn ===
+# === BACKGROUND: đặt <img> cố định sau toàn bộ app (cực chắc) ===
 BG_URL = "https://drive.google.com/uc?id=1H_06y2X9Vdleg6-VqsWebWF353Gfe21U"
 
 st.markdown(f"""
 <style>
-/* Đảm bảo root cao full để nền phủ đúng */
-html, body, .stApp {{
-  height: 100%;
-}}
-
-/* Bỏ nền trắng mặc định của vùng nội dung để nhìn thấy ảnh phía sau */
-[data-testid="stAppViewContainer"] {{
+/* Cho mọi lớp chính trong suốt để thấy ảnh phía sau */
+html, body, .stApp, [data-testid="stAppViewContainer"] {{
   background: transparent !important;
 }}
-
-/* Phần tử nền cố định phủ toàn màn hình, nằm dưới mọi nội dung */
-#global-bg-holder {{
+/* Ảnh nền cố định phủ full màn, nằm dưới mọi nội dung */
+#app-global-bg-img {{
   position: fixed;
-  inset: 0;               /* top:0; right:0; bottom:0; left:0 */
-  z-index: -1;            /* cho xuống dưới toàn bộ app */
-}}
-
-/* Dùng ::before để vẽ background lên holder */
-#global-bg-holder::before {{
-  content: "";
-  position: absolute;
-  inset: 0;
-  background-image: url('{BG_URL}');
-  background-size: cover;
-  background-position: center;
-  background-attachment: fixed;  /* hiệu ứng parallax mượt */
-  background-repeat: no-repeat;
-  opacity: 0.18;                 /* Độ mờ (0.12–0.25 đẹp) */
+  inset: 0;                  /* top/right/bottom/left: 0 */
+  width: 100vw;
+  height: 100vh;
+  object-fit: cover;         /* phủ kín, không méo */
+  z-index: -1;               /* đẩy xuống dưới nội dung */
+  opacity: 0.18;             /* chỉnh độ mờ 0.12–0.25 */
   filter: saturate(110%) contrast(105%);
 }}
-
-/* Giữ header dễ đọc */
+/* Header mờ nhẹ để dễ đọc khi cuộn */
 [data-testid="stHeader"] {{
   background: rgba(255,255,255,0.82) !important;
   backdrop-filter: blur(4px);
   border-bottom: 1px solid rgba(0,0,0,0.05);
 }}
 </style>
-
-<!-- Phần tử nền đứng độc lập, fixed toàn trang -->
-<div id="global-bg-holder"></div>
+<img id="app-global-bg-img" src="{BG_URL}" />
 """, unsafe_allow_html=True)
+
 
 
 
