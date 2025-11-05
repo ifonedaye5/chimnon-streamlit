@@ -7,21 +7,36 @@ from datetime import datetime
 
 st.set_page_config(page_title="⚽ Giải Chim Non Lần 2 — Cup Manager 🏆", layout="wide")
 
-# === BACKGROUND: toàn trang (mờ) ===
+# === BACKGROUND nền chìm toàn trang (chuẩn) ===
 BACKGROUND_URL = "https://drive.google.com/uc?id=1H_06y2X9Vdleg6-VqsWebWF353Gfe21U"
 
 st.markdown(f"""
 <style>
-/* Phủ ảnh nền toàn trang, làm mờ bằng lớp trắng 0.88 */
-.stApp {{
-  background: 
-    linear-gradient(rgba(255,255,255,0.88), rgba(255,255,255,0.88)),
-    url('{BACKGROUND_URL}') center top / cover no-repeat fixed;
+/* 1) Bỏ nền mặc định của vùng nội dung để nhìn thấy ảnh phía sau */
+[data-testid="stAppViewContainer"] {{
+  background: transparent !important;
 }}
-/* Thu gọn khoảng trắng phần nội dung */
-.block-container {{ padding-top: 1.2rem; }}
+
+/* 2) Phủ ảnh nền dưới toàn bộ app bằng pseudo-element (không che nội dung) */
+.stApp::before {{
+  content: "";
+  position: fixed;
+  inset: 0;                      /* top:0; right:0; bottom:0; left:0 */
+  background: url('{BACKGROUND_URL}') center/cover no-repeat fixed;
+  opacity: 0.18;                 /* Độ mờ ảnh nền. Gợi ý: 0.12–0.25 */
+  z-index: -1;                   /* Đẩy xuống dưới mọi nội dung */
+  filter: saturate(110%) contrast(105%);
+}}
+
+/* 3) Giữ header dễ đọc khi lướt */
+[data-testid="stHeader"] {{
+  background: rgba(255,255,255,0.82) !important;
+  backdrop-filter: blur(4px);
+  border-bottom: 1px solid rgba(0,0,0,0.05);
+}}
 </style>
 """, unsafe_allow_html=True)
+
 
 
 # ========== 1) SECRETS ==========
