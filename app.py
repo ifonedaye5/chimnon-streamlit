@@ -757,14 +757,22 @@ with tab2:
                 icon = "🟨🟨"
             elif et in {"yellow_plus_direct_red"}:
                 icon = "🟨➕🟥"
+            elif et == "own_goal":                     # <<< THÊM MỚI
+                icon = "⚽"                             # <<< dùng icon bóng
 
             minute = str(ev.get("minute","")).strip()
             pid = str(ev.get("player_id","")).strip()
             pname, shirt, _tid = pmap.get(pid, ("", "", ""))
             if not pname:
                 pname = ev.get("player_name", pid)
+                
+            # Nếu là own_goal thì không hiển thị tên cầu thủ, chỉ ghi "Phản lưới"
+            if et == "own_goal":                        # <<< THÊM MỚI
+                left = "Phản lưới"
+            else:
+                left = f"{shirt}. {pname}".strip(". ").strip()
 
-            left = f"{shirt}. {pname}".strip(". ").strip()
+            
             right = f"({minute}')" if minute else ""
             return f"<div class='ev-item'>{icon} {left} {right}</div>"
 
