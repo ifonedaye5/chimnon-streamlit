@@ -455,6 +455,23 @@ with tab1:
                 st.markdown("#### Bảng A")
                 # 1) Tính BXH bảng A
                 table_a = standings_group("A").copy()
+                # --- Ép kiểu số & sắp xếp BXH (A) ---
+                for c in ["Điểm", "HS", "BT", "FairPlay"]:
+                    if c in table_a.columns:
+                        table_a[c] = pd.to_numeric(table_a[c], errors="coerce").fillna(0)
+
+                # Sort: Điểm ↓, HS ↓, BT ↓, FairPlay ↑
+                sort_cols = [c for c in ["Điểm", "HS", "BT", "FairPlay"] if c in table_a.columns]
+                asc_flags = [False, False, False, True][:len(sort_cols)]
+                table_a = table_a.sort_values(by=sort_cols, ascending=asc_flags).reset_index(drop=True)
+
+                # Cấp lại thứ hạng 1..n
+                if "rank" in table_a.columns:  # phòng TH bạn đã rename trước đó
+                    table_a.drop(columns=["rank"], inplace=True)
+                elif "Hạng" in table_a.columns:
+                    table_a.drop(columns=["Hạng"], inplace=True)
+                table_a.insert(0, "rank", range(1, len(table_a) + 1))
+
 
                 # 2) Chuẩn hoá tên cột về chuẩn dùng chung
                 table_a = table_a.rename(columns={
@@ -488,6 +505,21 @@ with tab1:
                 st.markdown("#### Bảng B")
                 # 1) Tính BXH bảng B
                 table_b = standings_group("B").copy()
+                # --- Ép kiểu số & sắp xếp BXH (B) ---
+                for c in ["Điểm", "HS", "BT", "FairPlay"]:
+                    if c in table_b.columns:
+                        table_b[c] = pd.to_numeric(table_b[c], errors="coerce").fillna(0)
+
+                sort_cols = [c for c in ["Điểm", "HS", "BT", "FairPlay"] if c in table_b.columns]
+                asc_flags = [False, False, False, True][:len(sort_cols)]
+                table_b = table_b.sort_values(by=sort_cols, ascending=asc_flags).reset_index(drop=True)
+
+                if "rank" in table_b.columns:
+                    table_b.drop(columns=["rank"], inplace=True)
+                elif "Hạng" in table_b.columns:
+                    table_b.drop(columns=["Hạng"], inplace=True)
+                table_b.insert(0, "rank", range(1, len(table_b) + 1))
+
 
                 # 2) Chuẩn hoá tên cột về chuẩn dùng chung
                 table_b = table_b.rename(columns={
@@ -541,6 +573,23 @@ with tab1:
                 if "logo" in cols and "team_name" in cols:
                     cols.insert(cols.index("team_name"), cols.pop(cols.index("logo")))
                     merged = merged[cols]
+                    
+            # --- Ép kiểu số & sắp xếp BXH (gộp) ---
+            for c in ["Điểm", "HS", "BT", "FairPlay"]:
+                if c in merged.columns:
+                    merged[c] = pd.to_numeric(merged[c], errors="coerce").fillna(0)
+
+            sort_cols = [c for c in ["Điểm", "HS", "BT", "FairPlay"] if c in merged.columns]
+            asc_flags = [False, False, False, True][:len(sort_cols)]
+            merged = merged.sort_values(by=sort_cols, ascending=asc_flags).reset_index(drop=True)
+
+            # Nếu muốn có cột 'rank' chung cho toàn bộ, thêm:
+            if "rank" in merged.columns:
+                merged.drop(columns=["rank"], inplace=True)
+            elif "Hạng" in merged.columns:
+                merged.drop(columns=["Hạng"], inplace=True)
+            merged.insert(0, "rank", range(1, len(merged) + 1))
+
 
             st.dataframe(
                 merged,
