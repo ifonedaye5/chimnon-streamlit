@@ -1043,20 +1043,41 @@ with tab2:
                         st.markdown(f"#### {rn}")
                         subr = ko[ko["round_norm"] == rn].copy().sort_values(by=["ko_id","match_id"])
                         for _, rr in subr.iterrows():
-                            # hiển thị theo slot (A1, B4, Winner M201, ...)
+                                                        # hiển thị theo slot (A1, B4, Winner M201, ...)
                             home = resolve_slot(rr.get("slot_home_from",""))
                             away = resolve_slot(rr.get("slot_away_from",""))
-                            # cố lấy tỉ số ở matches nếu có match_id
+
+                            # Cố lấy tỉ số + thời gian + sân + trạng thái từ sheet matches
                             score_html = "vs"
+                            meta_line  = ""
+                            status_html = ""
                             mid = str(rr.get("match_id","")).strip()
+
                             if mid:
                                 got = mdf[mdf.get("match_id","") == mid]
                                 if not got.empty:
+                                    row_m = got.iloc[0]
+
+                                    # Tỉ số
                                     try:
-                                        hg = int(got.iloc[0].get("home_goals")); ag = int(got.iloc[0].get("away_goals"))
+                                        hg = int(row_m.get("home_goals"))
+                                        ag = int(row_m.get("away_goals"))
                                         score_html = f"{hg} – {ag}"
                                     except Exception:
                                         pass
+
+                                    # Thời gian + sân (giống vòng bảng)
+                                    date  = str(row_m.get("date","")).strip()
+                                    time_ = str(row_m.get("time","")).strip()
+                                    venue = str(row_m.get("venue","")).strip()
+                                    parts = [x for x in [date, time_, venue] if x]
+                                    meta_line = " • ".join(parts)
+
+                                    # Trạng thái (Finished / Scheduled / Live...)
+                                    status_val = str(row_m.get("status","")).strip()
+                                    status_html = render_status_badge(status_val)
+
+                            # Thẻ card knockout
                             card_html = f"""
                             <div style='border:1px solid #e9ecef;border-radius:10px;padding:8px 10px;margin-bottom:8px;background:#fff;'>
                               <div style='display:flex;justify-content:space-between;gap:8px;font-size:14px;'>
@@ -1065,6 +1086,9 @@ with tab2:
                                 <div style='flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:right;'>{away}</div>
                               </div>
                               <div style='text-align:center;color:#6c757d;font-size:12px;margin-top:2px;'>
+                                {meta_line} {status_html}
+                              </div>
+                              <div style='text-align:center;color:#94a3b8;font-size:11px;margin-top:2px;'>
                                 {mid} {rr.get("notes","") or ""}
                               </div>
                             </div>
@@ -1444,5 +1468,6 @@ with tab_gallery:
                         st.image(url, caption=(caps[i] if i < len(caps) else ""), use_column_width=True)
     except Exception as e:
         st.error(f"Lỗi đọc sheet 'photos': {e}")
+
 
 
