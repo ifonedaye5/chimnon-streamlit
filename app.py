@@ -941,26 +941,67 @@ with tab2:
                     if c not in ko.columns:
                         ko[c] = ""
 
-                # Lấy standings hiện thời để resolve A1, B4...
+                                # Lấy BXH theo từng bảng (A/B/...) để map slot A1, B4, ...
                 slot_to_team = {}
                 try:
-                    stand = compute_standings(teams_df, matches_df, events_df).copy()
-                    stand.columns = [x.strip().lower() for x in stand.columns]
-                    grp_col = "group" if "group" in stand.columns else "bảng"
-                    team_col = "team_name" if "team_name" in stand.columns else ("đội" if "đội" in stand.columns else "team_id")
-                    if "pos" in stand.columns:
-                        pos_col = "pos"
-                    elif "rank" in stand.columns:
-                        pos_col = "rank"
-                    elif "thứ hạng" in stand.columns:
-                        pos_col = "thứ hạng"
-                    else:
-                        stand["pos"] = stand.groupby(grp_col).cumcount()+1
-                        pos_col = "pos"
-                    for _, rr in stand.dropna(subset=[grp_col]).iterrows():
-                        slot_to_team[f"{str(rr[grp_col]).strip().upper()}{int(rr[pos_col])}"] = str(rr[team_col])
-                except Exception:
+                    # Chuẩn hoá teams & matches
+                    t_all = teams_df.copy()
+                    t_all.columns = [c.strip().lower() for c in t_all.columns]
+                    m_all = matches_df.copy()
+                    m_all.columns = [c.strip().lower() for c in m_all.columns]
+
+                    # Danh sách các bảng: A, B, (sau này C, D...)
+                    groups = (
+                        t_all.get("group", pd.Series(dtype=str))
+                             .astype(str)
+                             .str.upper()
+                             .unique()
+                             .tolist()
+                    )
+                    groups = [g for g in groups if g and g.lower() != "nan"]
+
+                    for g in groups:
+                        # BXH riêng từng bảng
+                        t_sub = t_all[t_all.get("group", "").astype(str).str.upper() == g]
+                        m_sub = m_all[m_all.get("group", "").astype(str).str.upper() == g]
+
+                        table = compute_standings(t_sub, m_sub, events_df).copy()
+                        if table.empty:
+                            continue
+
+                        # Ép số & sort giống tab Bảng xếp hạng
+                        for c in ["Điểm", "HS", "BT", "FairPlay"]:
+                            if c in table.columns:
+                                table[c] = pd.to_numeric(table[c], errors="coerce").fillna(0)
+
+                        sort_cols = [c for c in ["Điểm", "HS", "BT", "FairPlay"] if c in table.columns]
+                        asc_flags = [False, False, False, True][:len(sort_cols)]
+                        if sort_cols:
+                            table = table.sort_values(by=sort_cols, ascending=asc_flags).reset_index(drop=True)
+
+                        # Cấp lại thứ hạng 1..n
+                        if "rank" in table.columns:
+                            table.drop(columns=["rank"], inplace=True)
+                        if "Hạng" in table.columns:
+                            table.drop(columns=["Hạng"], inplace=True)
+                        table.insert(0, "rank", range(1, len(table) + 1))
+
+                        # Chuẩn hoá tên cột
+                        table = table.rename(columns={
+                            "Team ID": "team_id",
+                            "Đội": "team_name"
+                        })
+
+                        # Gán slot: A1, A2, B1, B2...
+                        for _, rr in table.iterrows():
+                            key = f"{g}{int(rr['rank'])}"
+                            name = str(rr.get("team_name") or rr.get("team_id"))
+                            slot_to_team[key] = name
+
+                except Exception as e:
+                    # Nếu có lỗi thì để nguyên: hiển thị A1, B4... như cũ
                     pass
+
 
                 mm = mdf.copy()
                 win_by_match, lose_by_match = {}, {}
@@ -1403,4 +1444,5 @@ with tab_gallery:
                         st.image(url, caption=(caps[i] if i < len(caps) else ""), use_column_width=True)
     except Exception as e:
         st.error(f"Lỗi đọc sheet 'photos': {e}")
+
 
