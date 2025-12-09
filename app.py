@@ -1013,7 +1013,7 @@ with tab2:
                     except Exception:
                         continue
 
-                                        home_id = str(r.get("home_team_id", "")).strip()
+                    home_id = str(r.get("home_team_id", "")).strip()
                     away_id = str(r.get("away_team_id", "")).strip()
 
                     def _resolve_basic_team(tid: str) -> str:
