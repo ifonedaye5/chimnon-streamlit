@@ -1013,8 +1013,19 @@ with tab2:
                     except Exception:
                         continue
 
-                    hname = name_map.get(r.get("home_team_id", ""), r.get("home_team_id", ""))
-                    aname = name_map.get(r.get("away_team_id", ""), r.get("away_team_id", ""))
+                                        home_id = str(r.get("home_team_id", "")).strip()
+                    away_id = str(r.get("away_team_id", "")).strip()
+
+                    def _resolve_basic_team(tid: str) -> str:
+                        # Ưu tiên map A1/B4... sang tên đội theo BXH nếu có
+                        if tid in slot_to_team:
+                            return slot_to_team[tid]
+                        # Nếu là mã đội thật trong sheet teams -> dùng name_map
+                        return name_map.get(tid, tid)
+
+                    hname = _resolve_basic_team(home_id)
+                    aname = _resolve_basic_team(away_id)
+
 
                     # Cột penalty_winner (Home / Away), nếu có
                     pen = str(r.get("penalty_winner", "")).strip().lower()
@@ -1486,6 +1497,7 @@ with tab_gallery:
                         st.image(url, caption=(caps[i] if i < len(caps) else ""), use_column_width=True)
     except Exception as e:
         st.error(f"Lỗi đọc sheet 'photos': {e}")
+
 
 
 
