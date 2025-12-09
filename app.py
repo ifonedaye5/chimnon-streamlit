@@ -933,24 +933,22 @@ with tab2:
                                 subr = subr.sort_values(by=["date","time","match_id"])
                             for _, r in subr.iterrows():
                                 st.markdown(small_card(r), unsafe_allow_html=True)
-            else:
+                        else:
                 # Đọc theo cấu hình slot trong sheet 'knockout'
                 ko = ko_df.copy()
                 ko.columns = [c.strip().lower() for c in ko.columns]
-                for c in ["ko_id","round","match_id","slot_home_from","slot_away_from","notes"]:
+                for c in ["ko_id", "round", "match_id", "slot_home_from", "slot_away_from", "notes"]:
                     if c not in ko.columns:
                         ko[c] = ""
 
-                                # Lấy BXH theo từng bảng (A/B/...) để map slot A1, B4, ...
+                # ===== Map slot A1, B4... -> tên đội theo BXH hiện tại =====
                 slot_to_team = {}
                 try:
-                    # Chuẩn hoá teams & matches
                     t_all = teams_df.copy()
                     t_all.columns = [c.strip().lower() for c in t_all.columns]
                     m_all = matches_df.copy()
                     m_all.columns = [c.strip().lower() for c in m_all.columns]
 
-                    # Danh sách các bảng: A, B, (sau này C, D...)
                     groups = (
                         t_all.get("group", pd.Series(dtype=str))
                              .astype(str)
@@ -961,7 +959,6 @@ with tab2:
                     groups = [g for g in groups if g and g.lower() != "nan"]
 
                     for g in groups:
-                        # BXH riêng từng bảng
                         t_sub = t_all[t_all.get("group", "").astype(str).str.upper() == g]
                         m_sub = m_all[m_all.get("group", "").astype(str).str.upper() == g]
 
@@ -969,7 +966,6 @@ with tab2:
                         if table.empty:
                             continue
 
-                        # Ép số & sort giống tab Bảng xếp hạng
                         for c in ["Điểm", "HS", "BT", "FairPlay"]:
                             if c in table.columns:
                                 table[c] = pd.to_numeric(table[c], errors="coerce").fillna(0)
@@ -979,31 +975,28 @@ with tab2:
                         if sort_cols:
                             table = table.sort_values(by=sort_cols, ascending=asc_flags).reset_index(drop=True)
 
-                        # Cấp lại thứ hạng 1..n
                         if "rank" in table.columns:
                             table.drop(columns=["rank"], inplace=True)
                         if "Hạng" in table.columns:
                             table.drop(columns=["Hạng"], inplace=True)
                         table.insert(0, "rank", range(1, len(table) + 1))
 
-                        # Chuẩn hoá tên cột
                         table = table.rename(columns={
                             "Team ID": "team_id",
                             "Đội": "team_name"
                         })
 
-                        # Gán slot: A1, A2, B1, B2...
                         for _, rr in table.iterrows():
                             key = f"{g}{int(rr['rank'])}"
                             name = str(rr.get("team_name") or rr.get("team_id"))
                             slot_to_team[key] = name
 
-                except Exception as e:
-                    # Nếu có lỗi thì để nguyên: hiển thị A1, B4... như cũ
+                except Exception:
+                    # nếu có lỗi thì knockout vẫn hiện A1, B4...
                     pass
 
-
-                                mm = mdf.copy()
+                # ===== Map winner / loser cho từng match_id (hỗ trợ penalty_winner) =====
+                mm = mdf.copy()
                 win_by_match, lose_by_match = {}, {}
 
                 for _, r in mm.iterrows():
@@ -1018,42 +1011,49 @@ with tab2:
                     except Exception:
                         continue
 
-                    hname = name_map.get(r.get("home_team_id",""), r.get("home_team_id",""))
-                    aname = name_map.get(r.get("away_team_id",""), r.get("away_team_id",""))
+                    hname = name_map.get(r.get("home_team_id", ""), r.get("home_team_id", ""))
+                    aname = name_map.get(r.get("away_team_id", ""), r.get("away_team_id", ""))
 
-                    # Xem có cột penalty_winner không
+                    # Cột penalty_winner (Home / Away), nếu có
                     pen = str(r.get("penalty_winner", "")).strip().lower()
 
-                    # Xác định winner / loser
                     if hg > ag:
                         winner, loser = hname, aname
                     elif hg < ag:
                         winner, loser = aname, hname
                     else:
-                        # Hoà nhưng có đá pen
+                        # Hoà: nếu có penalty_winner thì dùng để phân thắng thua
                         if pen in ("home", "h"):
                             winner, loser = hname, aname
                         elif pen in ("away", "a"):
                             winner, loser = aname, hname
                         else:
-                            # Hoà mà chưa biết ai thắng → bỏ qua, knockout vẫn hiện Winner Mxxx
+                            # Hoà mà chưa xác định thắng pen -> bỏ qua
                             continue
 
                     win_by_match[mid] = winner
                     lose_by_match[mid] = loser
 
-
                 def resolve_slot(s: str) -> str:
                     s = str(s).strip()
-                    if not s: return ""
+                    if not s:
+                        return ""
                     S = s.upper()
-                    if len(S) in (2,3) and S[0].isalpha() and S[1:].isdigit():
+                    # A1, B4...
+                    if len(S) in (2, 3) and S[0].isalpha() and S[1:].isdigit():
                         return slot_to_team.get(S, s)
+                    # Winner M201 / Loser M301...
                     if S.startswith("WINNER "):
-                        mid = s.split()[-1];  return win_by_match.get(mid, s)
+                        mid = s.split()[-1]
+                        return win_by_match.get(mid, s)
                     if S.startswith("LOSER "):
-                        mid = s.split()[-1];  return lose_by_match.get(mid, s)
+                        mid = s.split()[-1]
+                        return lose_by_match.get(mid, s)
+                    # Trường hợp đặc biệt: dùng trực tiếp match_id (M201) trong home_team_id / away_team_id
+                    if S.startswith("M") and S[1:].isdigit():
+                        return win_by_match.get(S, s)
                     return s
+
 
                 order = ["1/8","Tứ kết","Bán kết","Chung kết","Tranh hạng 3"]
                 ko["round_norm"] = ko["round"].apply(norm_round)
@@ -1491,6 +1491,7 @@ with tab_gallery:
                         st.image(url, caption=(caps[i] if i < len(caps) else ""), use_column_width=True)
     except Exception as e:
         st.error(f"Lỗi đọc sheet 'photos': {e}")
+
 
 
 
