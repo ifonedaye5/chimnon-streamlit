@@ -907,11 +907,12 @@ with tab2:
             </div>
             """
 
-        # ====== Hiển thị ======
+                # ====== Hiển thị ======
         if view_mode == "Sơ đồ nhánh (Knockout)":
             # Ưu tiên đọc sheet 'knockout' nếu đã load vào biến toàn cục
             ko_df = globals().get("knockout_df", pd.DataFrame())
-            # Nếu không có, fallback: lấy từ matches nơi stage không chứa 'vòng bảng'
+
+            # ===== Trường hợp KHÔNG có sheet knockout: fallback lấy từ matches =====
             if ko_df.empty:
                 s = show.copy()
                 s_stage = s.get("stage", pd.Series(dtype=str)).astype(str).str.lower()
@@ -919,8 +920,8 @@ with tab2:
                 if knockout.empty:
                     st.info("Chưa có dữ liệu vòng loại trực tiếp (knockout).")
                 else:
-                    knockout["round_norm"] = knockout.get("round","").apply(norm_round)
-                    order = ["1/8","Tứ kết","Bán kết","Chung kết","Tranh hạng 3"]
+                    knockout["round_norm"] = knockout.get("round", "").apply(norm_round)
+                    order = ["1/8", "Tứ kết", "Bán kết", "Chung kết", "Tranh hạng 3"]
                     rounds_present = [r for r in order if r in knockout["round_norm"].unique().tolist()]
                     if not rounds_present:
                         rounds_present = sorted(knockout["round_norm"].dropna().unique().tolist())
@@ -929,19 +930,20 @@ with tab2:
                         with cols[i]:
                             st.markdown(f"#### {rname}")
                             subr = knockout[knockout["round_norm"] == rname].copy()
-                            if {"date","time"}.issubset(subr.columns):
-                                subr = subr.sort_values(by=["date","time","match_id"])
+                            if {"date", "time"}.issubset(subr.columns):
+                                subr = subr.sort_values(by=["date", "time", "match_id"])
                             for _, r in subr.iterrows():
                                 st.markdown(small_card(r), unsafe_allow_html=True)
-                        else:
-                # Đọc theo cấu hình slot trong sheet 'knockout'
+
+            # ===== Có sheet knockout: dùng cấu hình ko_id / slot_home_from / slot_away_from =====
+            else:
                 ko = ko_df.copy()
                 ko.columns = [c.strip().lower() for c in ko.columns]
                 for c in ["ko_id", "round", "match_id", "slot_home_from", "slot_away_from", "notes"]:
                     if c not in ko.columns:
                         ko[c] = ""
 
-                # ===== Map slot A1, B4... -> tên đội theo BXH hiện tại =====
+                # ----- Map slot A1, B4... -> tên đội theo BXH hiện tại -----
                 slot_to_team = {}
                 try:
                     t_all = teams_df.copy()
@@ -995,7 +997,7 @@ with tab2:
                     # nếu có lỗi thì knockout vẫn hiện A1, B4...
                     pass
 
-                # ===== Map winner / loser cho từng match_id (hỗ trợ penalty_winner) =====
+                # ----- Map winner / loser theo match_id (hỗ trợ penalty_winner) -----
                 mm = mdf.copy()
                 win_by_match, lose_by_match = {}, {}
 
@@ -1049,13 +1051,12 @@ with tab2:
                     if S.startswith("LOSER "):
                         mid = s.split()[-1]
                         return lose_by_match.get(mid, s)
-                    # Trường hợp đặc biệt: dùng trực tiếp match_id (M201) trong home_team_id / away_team_id
+                    # Trường hợp dùng trực tiếp match_id (M201) trong home_team_id/away_team_id
                     if S.startswith("M") and S[1:].isdigit():
                         return win_by_match.get(S, s)
                     return s
 
-
-                order = ["1/8","Tứ kết","Bán kết","Chung kết","Tranh hạng 3"]
+                order = ["1/8", "Tứ kết", "Bán kết", "Chung kết", "Tranh hạng 3"]
                 ko["round_norm"] = ko["round"].apply(norm_round)
                 rounds_present = [r for r in order if r in ko["round_norm"].unique().tolist()]
                 if not rounds_present:
@@ -1064,24 +1065,20 @@ with tab2:
                 for i, rn in enumerate(rounds_present):
                     with cols[i]:
                         st.markdown(f"#### {rn}")
-                        subr = ko[ko["round_norm"] == rn].copy().sort_values(by=["ko_id","match_id"])
+                        subr = ko[ko["round_norm"] == rn].copy().sort_values(by=["ko_id", "match_id"])
                         for _, rr in subr.iterrows():
-                                                        # hiển thị theo slot (A1, B4, Winner M201, ...)
-                            home = resolve_slot(rr.get("slot_home_from",""))
-                            away = resolve_slot(rr.get("slot_away_from",""))
+                            home = resolve_slot(rr.get("slot_home_from", ""))
+                            away = resolve_slot(rr.get("slot_away_from", ""))
 
-                            # Cố lấy tỉ số + thời gian + sân + trạng thái từ sheet matches
                             score_html = "vs"
-                            meta_line  = ""
+                            meta_line = ""
                             status_html = ""
-                            mid = str(rr.get("match_id","")).strip()
+                            mid = str(rr.get("match_id", "")).strip()
 
                             if mid:
-                                got = mdf[mdf.get("match_id","") == mid]
+                                got = mdf[mdf.get("match_id", "") == mid]
                                 if not got.empty:
                                     row_m = got.iloc[0]
-
-                                    # Tỉ số
                                     try:
                                         hg = int(row_m.get("home_goals"))
                                         ag = int(row_m.get("away_goals"))
@@ -1089,18 +1086,15 @@ with tab2:
                                     except Exception:
                                         pass
 
-                                    # Thời gian + sân (giống vòng bảng)
-                                    date  = str(row_m.get("date","")).strip()
-                                    time_ = str(row_m.get("time","")).strip()
-                                    venue = str(row_m.get("venue","")).strip()
+                                    date = str(row_m.get("date", "")).strip()
+                                    time_ = str(row_m.get("time", "")).strip()
+                                    venue = str(row_m.get("venue", "")).strip()
                                     parts = [x for x in [date, time_, venue] if x]
                                     meta_line = " • ".join(parts)
 
-                                    # Trạng thái (Finished / Scheduled / Live...)
-                                    status_val = str(row_m.get("status","")).strip()
+                                    status_val = str(row_m.get("status", "")).strip()
                                     status_html = render_status_badge(status_val)
 
-                            # Thẻ card knockout
                             card_html = f"""
                             <div style='border:1px solid #e9ecef;border-radius:10px;padding:8px 10px;margin-bottom:8px;background:#fff;'>
                               <div style='display:flex;justify-content:space-between;gap:8px;font-size:14px;'>
@@ -1197,6 +1191,7 @@ with tab2:
                     st.markdown(match_card(row), unsafe_allow_html=True)
                     with st.expander(f"Chi tiết trận {row.get('match_id','')}", expanded=False):
                         render_events_for_match(row)
+
 
 
 
@@ -1491,6 +1486,7 @@ with tab_gallery:
                         st.image(url, caption=(caps[i] if i < len(caps) else ""), use_column_width=True)
     except Exception as e:
         st.error(f"Lỗi đọc sheet 'photos': {e}")
+
 
 
 
