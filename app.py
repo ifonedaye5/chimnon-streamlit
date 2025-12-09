@@ -1003,22 +1003,45 @@ with tab2:
                     pass
 
 
-                mm = mdf.copy()
+                                mm = mdf.copy()
                 win_by_match, lose_by_match = {}, {}
+
                 for _, r in mm.iterrows():
-                    mid = str(r.get("match_id","")).strip()
+                    mid = str(r.get("match_id", "")).strip()
+                    if not mid:
+                        continue
+
+                    # Tỉ số chính thức
                     try:
-                        hg = int(r.get("home_goals")); ag = int(r.get("away_goals"))
+                        hg = int(r.get("home_goals"))
+                        ag = int(r.get("away_goals"))
                     except Exception:
                         continue
-                    if not mid or hg == ag:
-                        continue
+
                     hname = name_map.get(r.get("home_team_id",""), r.get("home_team_id",""))
                     aname = name_map.get(r.get("away_team_id",""), r.get("away_team_id",""))
+
+                    # Xem có cột penalty_winner không
+                    pen = str(r.get("penalty_winner", "")).strip().lower()
+
+                    # Xác định winner / loser
                     if hg > ag:
-                        win_by_match[mid] = hname; lose_by_match[mid] = aname
+                        winner, loser = hname, aname
+                    elif hg < ag:
+                        winner, loser = aname, hname
                     else:
-                        win_by_match[mid] = aname; lose_by_match[mid] = hname
+                        # Hoà nhưng có đá pen
+                        if pen in ("home", "h"):
+                            winner, loser = hname, aname
+                        elif pen in ("away", "a"):
+                            winner, loser = aname, hname
+                        else:
+                            # Hoà mà chưa biết ai thắng → bỏ qua, knockout vẫn hiện Winner Mxxx
+                            continue
+
+                    win_by_match[mid] = winner
+                    lose_by_match[mid] = loser
+
 
                 def resolve_slot(s: str) -> str:
                     s = str(s).strip()
@@ -1468,6 +1491,7 @@ with tab_gallery:
                         st.image(url, caption=(caps[i] if i < len(caps) else ""), use_column_width=True)
     except Exception as e:
         st.error(f"Lỗi đọc sheet 'photos': {e}")
+
 
 
 
