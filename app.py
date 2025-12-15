@@ -607,6 +607,35 @@ with tab1:
 
 with tab2:
     st.subheader("Lịch thi đấu")
+    st.markdown("""
+    <style>
+    @keyframes koGlow {
+      0%,100% { box-shadow: 0 0 0 rgba(59,130,246,0); }
+      50% { box-shadow: 0 0 18px rgba(59,130,246,0.55); }
+    }
+    @keyframes koWinner {
+      0%,100% { text-shadow: 0 0 0 rgba(255,215,0,0); }
+      50% { text-shadow: 0 0 10px rgba(255,215,0,0.85); }
+    }
+    @keyframes koPulse {
+      0% { transform: scale(1); }
+      50% { transform: scale(1.02); }
+      100% { transform: scale(1); }
+    }
+    
+    .ko-card {
+      border:1px solid #e5e7eb;
+      border-radius:12px;
+      padding:8px 10px;
+      margin-bottom:10px;
+      background:#fff;
+    }
+    .ko-finished { animation: koGlow 1.2s ease-in-out infinite; }
+    .ko-scheduled { animation: koPulse 1.6s ease-in-out infinite; border-style:dashed; }
+    .ko-winner { font-weight:900; color:#92400e; animation: koWinner 1s ease-in-out infinite; }
+    </style>
+    """, unsafe_allow_html=True)
+
     if matches_df.empty:
         st.info("Chưa có dữ liệu 'matches'.")
     else:
@@ -1693,6 +1722,7 @@ with tab_gallery:
                         st.image(url, caption=(caps[i] if i < len(caps) else ""), use_column_width=True)
     except Exception as e:
         st.error(f"Lỗi đọc sheet 'photos': {e}")
+
 
 
 
