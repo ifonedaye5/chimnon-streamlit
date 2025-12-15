@@ -1232,12 +1232,24 @@ with tab2:
 with tab3:
     left, right = st.columns([2,1])
 
+    # ===== CSS highlight lấp lánh cho Top 1 =====
+    st.markdown("""
+    <style>
+    @keyframes shimmer {
+      0%   { background-position: -200% 0; }
+      100% { background-position: 200% 0; }
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
     # Map team_id -> team_name để hiển thị đẹp
     tdf = teams_df.copy(); tdf.columns = [c.strip().lower() for c in tdf.columns]
-    name_map = dict(zip(tdf.get("team_id", pd.Series(dtype=str)),
-                        tdf.get("team_name", pd.Series(dtype=str))))
+    name_map = dict(zip(
+        tdf.get("team_id", pd.Series(dtype=str)).astype(str),
+        tdf.get("team_name", pd.Series(dtype=str)).astype(str)
+    ))
 
-    # ========= BÊN TRÁI: DANH SÁCH CẦU THỦ (có lọc) =========
+    # ========= BÊN TRÁI: DANH SÁCH CẦU THỦ (giữ nguyên) =========
     with left:
         st.subheader("Danh sách cầu thủ")
         if players_df.empty:
@@ -1260,9 +1272,11 @@ with tab3:
 
             show = pdf.copy()
 
+            # Lọc theo đội
             if team_pick != "Tất cả":
                 show = show[show["Đội"] == team_pick]
 
+            # Tìm nhanh theo tên, số áo, mã cầu thủ
             if q.strip():
                 qq = q.strip().lower()
                 def s(col):
@@ -1274,12 +1288,14 @@ with tab3:
                 )
                 show = show[mask]
 
+            # Sắp xếp mặc định theo Đội -> Số áo (nếu có)
             if "shirt_number" in show.columns:
                 show["__shirt_num__"] = pd.to_numeric(show["shirt_number"], errors="coerce")
                 show = show.sort_values(by=["Đội", "__shirt_num__", "player_name"], na_position="last")
             else:
                 show = show.sort_values(by=["Đội", "player_name"])
 
+            # Chọn & đổi tên cột sang tiếng Việt
             cols = [c for c in [
                 "player_id","player_name","Đội","shirt_number","position","dob","nationality","is_registered"
             ] if c in show.columns]
@@ -1298,56 +1314,209 @@ with tab3:
                 use_container_width=True
             )
 
-    # ========= BÊN PHẢI: THỐNG KÊ =========
+    # ========= BÊN PHẢI: FAIR PLAY -> VUA PHÁ LƯỚI -> THẺ PHẠT =========
     with right:
-        st.subheader("Thống kê ghi bàn / thẻ")
+        # ==========================================
+        # 1) FAIR PLAY (đẩy lên trên, sát vua phá lưới)
+        # ==========================================
+        st.subheader("🤝 Đội Fair Play toàn giải")
+
+        if events_df.empty:
+            st.info("Chưa có dữ liệu 'events' để tính Fair Play.")
+        else:
+            ev2 = events_df.copy()
+            ev2.columns = [c.strip().lower() for c in ev2.columns]
+
+            # Điểm fairplay (càng thấp càng tốt)
+            fp_all = compute_fairplay(ev2)
+
+            def _cnt(et: str) -> dict:
+                if ev2.empty or "event_type" not in ev2.columns or "team_id" not in ev2.columns:
+                    return {}
+                s = ev2[ev2["event_type"].astype(str).str.lower() == et]
+                return s.groupby("team_id").size().to_dict()
+
+            c_y   = _cnt("yellow")
+            c_sy  = _cnt("second_yellow")
+            c_r   = _cnt("red")
+            c_ypr = _cnt("yellow_plus_direct_red")
+
+            team_ids = sorted(set(name_map.keys()) | set(fp_all.keys()))
+            rows = []
+            for tid in team_ids:
+                rows.append({
+                    "team_id": tid,
+                    "Đội": name_map.get(tid, tid),
+                    "Điểm FairPlay": int(fp_all.get(tid, 0)),
+                    "Thẻ vàng": int(c_y.get(tid, 0)),
+                    "Đỏ gián tiếp (2V)": int(c_sy.get(tid, 0)),
+                    "Đỏ trực tiếp": int(c_r.get(tid, 0)),
+                    "Vàng+Đỏ": int(c_ypr.get(tid, 0)),
+                })
+
+            fp_df = pd.DataFrame(rows)
+
+            if fp_df.empty:
+                st.info("Chưa có dữ liệu Fair Play.")
+            else:
+                fp_df["Tổng đỏ"] = (
+                    fp_df["Đỏ trực tiếp"] +
+                    fp_df["Đỏ gián tiếp (2V)"] +
+                    fp_df["Vàng+Đỏ"]
+                )
+
+                # Sort: FairPlay ↑, Tổng đỏ ↑, Thẻ vàng ↑, Đội ↑ (ổn định)
+                fp_df = fp_df.sort_values(
+                    by=["Điểm FairPlay", "Tổng đỏ", "Thẻ vàng", "Đội"],
+                    ascending=[True, True, True, True]
+                ).reset_index(drop=True)
+
+                # ===== Hạng đồng hạng (chia đôi nếu top 1 bằng tuyệt đối) =====
+                rank_vals = []
+                cur_rank = 1
+                prev_key = None
+                for i, r in fp_df.iterrows():
+                    key = (int(r["Điểm FairPlay"]), int(r["Tổng đỏ"]), int(r["Thẻ vàng"]))
+                    if prev_key is None:
+                        rank_vals.append(cur_rank)
+                        prev_key = key
+                        continue
+                    if key != prev_key:
+                        cur_rank = i + 1
+                        prev_key = key
+                    rank_vals.append(cur_rank)
+                fp_df.insert(0, "Hạng", rank_vals)
+
+                # Nếu có 2 (hoặc nhiều) đội cùng hạng 1 => ghi chú chia đôi
+                n_top1 = int((fp_df["Hạng"] == 1).sum())
+                fp_df["Ghi chú"] = ""
+                if n_top1 >= 2:
+                    fp_df.loc[fp_df["Hạng"] == 1, "Ghi chú"] = "🏆 Đồng hạng 1 (chia đôi)"
+                else:
+                    fp_df.loc[fp_df["Hạng"] == 1, "Ghi chú"] = "🏆 Top 1"
+
+                show_fp = fp_df[["Hạng","Đội","Điểm FairPlay","Thẻ vàng","Đỏ gián tiếp (2V)","Đỏ trực tiếp","Vàng+Đỏ","Ghi chú"]].copy()
+
+                # ===== Style Top 1 (lấp lánh + đậm) =====
+                def _style_top1_fp(row):
+                    if int(row.get("Hạng", 999)) == 1:
+                        return [
+                            "font-weight:800;"
+                            "background: linear-gradient(90deg, rgba(255,215,0,0.25), rgba(255,255,255,0.85), rgba(255,215,0,0.25));"
+                            "background-size: 200% 100%;"
+                            "animation: shimmer 2.2s linear infinite;"
+                        ] * len(row)
+                    return [""] * len(row)
+
+                st.dataframe(
+                    show_fp.style.apply(_style_top1_fp, axis=1),
+                    use_container_width=True,
+                    hide_index=True
+                )
+
+        st.divider()
+
+        # ==========================================
+        # 2) VUA PHÁ LƯỚI (nổi bật top 1)
+        # ==========================================
+        st.subheader("⚽ Vua phá lưới (tạm tính)")
+
         if events_df.empty:
             st.info("Chưa có dữ liệu 'events'.")
         else:
             ev = events_df.copy()
             ev.columns = [c.strip().lower() for c in ev.columns]
 
-            # Chuẩn kiểu để merge an toàn
-            if "player_id" in ev.columns and "player_id" in players_df.columns:
+            if "player_id" in ev.columns and not players_df.empty:
                 ev["player_id"] = ev["player_id"].astype(str)
+
                 pmini = players_df.copy()
                 pmini.columns = [c.strip().lower() for c in pmini.columns]
                 pmini["player_id"] = pmini["player_id"].astype(str)
                 pmini["Đội"] = pmini.get("team_id", "").map(name_map).fillna(pmini.get("team_id",""))
 
-                # ==== Top ghi bàn ====
                 if "event_type" in ev.columns:
-                    goals = ev[ev["event_type"].str.lower() == "goal"]
-                    if not goals.empty:
+                    goals = ev[ev["event_type"].astype(str).str.lower() == "goal"]
+                    if goals.empty:
+                        st.info("Chưa có bàn thắng nào.")
+                    else:
                         top = (goals.groupby("player_id").size()
                                .reset_index(name="Bàn thắng"))
-                        top = (pmini.merge(top, how="right", on="player_id")
-                                     .rename(columns={
-                                         "player_id": "Mã cầu thủ",
-                                         "player_name": "Cầu thủ"
-                                     })
-                               )
-                        top = top[["Mã cầu thủ","Cầu thủ","Đội","Bàn thắng"]].sort_values(
-                            "Bàn thắng", ascending=False
-                        )
-                        st.markdown("**Vua phá lưới (tạm tính)**")
-                        st.dataframe(top, use_container_width=True)
-                    else:
-                        st.info("Chưa có bàn thắng nào.")
 
-                # ==== Thẻ phạt + TIỀN PHẠT theo đội ====
+                        top = (pmini.merge(top, how="right", on="player_id")
+                                   .rename(columns={
+                                       "player_id": "Mã cầu thủ",
+                                       "player_name": "Cầu thủ"
+                                   }))
+
+                        top = top[["Mã cầu thủ","Cầu thủ","Đội","Bàn thắng"]].sort_values(
+                            ["Bàn thắng","Cầu thủ"], ascending=[False, True]
+                        ).reset_index(drop=True)
+
+                        # Rank đồng hạng theo số bàn
+                        top.insert(0, "Hạng", top["Bàn thắng"].rank(method="min", ascending=False).astype(int))
+
+                        # highlight tất cả ai đang top 1 (nếu đồng hạng)
+                        max_goals = int(top["Bàn thắng"].max()) if not top.empty else 0
+                        top["Ghi chú"] = ""
+                        top.loc[top["Bàn thắng"] == max_goals, "Ghi chú"] = "🏆 Top 1"
+
+                        def _style_top1_scorer(row):
+                            if int(row.get("Bàn thắng", 0)) == max_goals and max_goals > 0:
+                                return [
+                                    "font-weight:800;"
+                                    "background: linear-gradient(90deg, rgba(173,216,230,0.35), rgba(255,255,255,0.92), rgba(173,216,230,0.35));"
+                                    "background-size: 200% 100%;"
+                                    "animation: shimmer 2.0s linear infinite;"
+                                ] * len(row)
+                            return [""] * len(row)
+
+                        st.dataframe(
+                            top[["Hạng","Cầu thủ","Đội","Bàn thắng","Ghi chú"]].style.apply(_style_top1_scorer, axis=1),
+                            use_container_width=True,
+                            hide_index=True
+                        )
+            else:
+                st.info("Thiếu player_id hoặc sheet players để tính vua phá lưới.")
+
+        st.divider()
+
+        # ==========================================
+        # 3) THẺ PHẠT + TIỀN PHẠT (đẩy xuống dưới cùng)
+        # ==========================================
+        st.subheader("🟨🟥 Thẻ phạt & Tiền phạt")
+
+        if events_df.empty:
+            st.info("Chưa có dữ liệu 'events'.")
+        else:
+            ev = events_df.copy()
+            ev.columns = [c.strip().lower() for c in ev.columns]
+
+            if "player_id" in ev.columns and "player_id" in players_df.columns:
+                ev["player_id"] = ev["player_id"].astype(str)
+
+                pmini = players_df.copy()
+                pmini.columns = [c.strip().lower() for c in pmini.columns]
+                pmini["player_id"] = pmini["player_id"].astype(str)
+                pmini["Đội"] = pmini.get("team_id", "").map(name_map).fillna(pmini.get("team_id",""))
+
                 card_types = ["yellow","red","second_yellow","yellow_plus_direct_red"]
                 cards = ev[ev.get("event_type","").isin(card_types)]
-                if not cards.empty:
-                    card_pvt = (cards.pivot_table(index="player_id",
-                                                  columns="event_type",
-                                                  aggfunc="size",
-                                                  fill_value=0)
-                                      .reset_index())
+
+                if cards.empty:
+                    st.info("Chưa có sự kiện thẻ nào.")
+                else:
+                    card_pvt = (cards.pivot_table(
+                                    index="player_id",
+                                    columns="event_type",
+                                    aggfunc="size",
+                                    fill_value=0
+                                ).reset_index())
                     card_pvt.columns = [str(c) for c in card_pvt.columns]
 
                     card_pvt = pmini.merge(card_pvt, how="right", on="player_id")
 
+                    # ----- CẤU HÌNH MỨC PHẠT (đồng) -----
                     FINE_YELLOW = 200_000
                     FINE_SECOND_YELLOW = 300_000
                     FINE_RED = 500_000
@@ -1395,80 +1564,14 @@ with tab3:
                         "Tiền phạt"
                     ] if c in show_fines.columns]
 
-                    st.markdown("**Thẻ phạt (tạm tính) & Tiền phạt theo cầu thủ**")
                     st.dataframe(
                         show_fines[keep].sort_values(by="Tiền phạt", ascending=False),
-                        use_container_width=True
+                        use_container_width=True,
+                        hide_index=True
                     )
-                else:
-                    st.info("Chưa có sự kiện thẻ nào.")
-
-        # ==========================================================
-        # ✅ THÊM MỚI: ĐỘI FAIR PLAY TOÀN GIẢI (leaderboard theo đội)
-        # ==========================================================
-        st.divider()
-        st.subheader("🤝 Đội Fair Play toàn giải")
-
-        if events_df.empty:
-            st.info("Chưa có dữ liệu 'events' để tính Fair Play.")
-        else:
-            ev2 = events_df.copy()
-            ev2.columns = [c.strip().lower() for c in ev2.columns]
-
-            # Điểm fairplay (càng thấp càng tốt)
-            fp_all = compute_fairplay(ev2)
-
-            # Đếm thẻ theo đội để show đẹp
-            def _cnt(et: str) -> dict:
-                if ev2.empty or "event_type" not in ev2.columns or "team_id" not in ev2.columns:
-                    return {}
-                s = ev2[ev2["event_type"].astype(str).str.lower() == et]
-                return s.groupby("team_id").size().to_dict()
-
-            c_y   = _cnt("yellow")
-            c_sy  = _cnt("second_yellow")
-            c_r   = _cnt("red")
-            c_ypr = _cnt("yellow_plus_direct_red")
-
-            team_ids = sorted(set(name_map.keys()) | set(fp_all.keys()))
-            rows = []
-            for tid in team_ids:
-                rows.append({
-                    "team_id": tid,
-                    "Đội": name_map.get(tid, tid),
-                    "Thẻ vàng": int(c_y.get(tid, 0)),
-                    "Đỏ gián tiếp (2V)": int(c_sy.get(tid, 0)),
-                    "Đỏ trực tiếp": int(c_r.get(tid, 0)),
-                    "Vàng+Đỏ": int(c_ypr.get(tid, 0)),
-                    "Điểm FairPlay": int(fp_all.get(tid, 0)),
-                })
-
-            fp_df = pd.DataFrame(rows)
-            if fp_df.empty:
-                st.info("Chưa có dữ liệu Fair Play.")
             else:
-                # Sort kiểu A cơ bản:
-                # 1) Điểm FairPlay ↑ (ưu tiên tuyệt đối)
-                # 2) Tổng đỏ ↑ ít hơn tốt hơn
-                # 3) Thẻ vàng ↑ ít hơn tốt hơn
-                fp_df["Tổng đỏ"] = (
-                    fp_df["Đỏ trực tiếp"] +
-                    fp_df["Đỏ gián tiếp (2V)"] +
-                    fp_df["Vàng+Đỏ"]
-                )
+                st.info("Thiếu player_id hoặc sheet players để thống kê thẻ & tiền phạt.")
 
-                fp_df = fp_df.sort_values(
-                    by=["Điểm FairPlay", "Tổng đỏ", "Thẻ vàng", "Đội"],
-                    ascending=[True, True, True, True]
-                ).reset_index(drop=True)
-
-                fp_df.insert(0, "Hạng", range(1, len(fp_df) + 1))
-
-                st.dataframe(
-                    fp_df[["Hạng","Đội","Điểm FairPlay","Thẻ vàng","Đỏ gián tiếp (2V)","Đỏ trực tiếp","Vàng+Đỏ"]],
-                    use_container_width=True,
-                    hide_index=True
-                )
 
 
 with tab_gallery:
@@ -1564,6 +1667,7 @@ with tab_gallery:
                         st.image(url, caption=(caps[i] if i < len(caps) else ""), use_column_width=True)
     except Exception as e:
         st.error(f"Lỗi đọc sheet 'photos': {e}")
+
 
 
 
