@@ -1000,52 +1000,72 @@ with tab2:
                 # ----- Map winner / loser theo match_id (hỗ trợ penalty_winner) -----
                 mm = mdf.copy()
                 win_by_match, lose_by_match = {}, {}
-
-                for _, r in mm.iterrows():
-                    mid = str(r.get("match_id", "")).strip()
+                
+                def resolve_ref(tid: str) -> str:
+                    tid = str(tid or "").strip()
+                    if not tid:
+                        return ""
+                    S = tid.upper()
+                
+                    # A1/B4...
+                    if len(S) in (2,3) and S[0].isalpha() and S[1:].isdigit():
+                        return slot_to_team.get(S, tid)
+                
+                    # Winner M201 / Loser M301
+                    if S.startswith("WINNER "):
+                        mid = tid.split()[-1].strip()
+                        return win_by_match.get(mid, tid)
+                    if S.startswith("LOSER "):
+                        mid = tid.split()[-1].strip()
+                        return lose_by_match.get(mid, tid)
+                
+                    return name_map.get(tid, tid)
+                
+                def decide_winner_loser(row):
+                    mid = str(row.get("match_id","")).strip()
                     if not mid:
-                        continue
-
-                    # Tỉ số chính thức
+                        return None
+                
                     try:
-                        hg = int(r.get("home_goals"))
-                        ag = int(r.get("away_goals"))
+                        hg = int(row.get("home_goals"))
+                        ag = int(row.get("away_goals"))
                     except Exception:
-                        continue
-
-                    home_id = str(r.get("home_team_id", "")).strip()
-                    away_id = str(r.get("away_team_id", "")).strip()
-
-                    def _resolve_basic_team(tid: str) -> str:
-                        # Ưu tiên map A1/B4... sang tên đội theo BXH nếu có
-                        if tid in slot_to_team:
-                            return slot_to_team[tid]
-                        # Nếu là mã đội thật trong sheet teams -> dùng name_map
-                        return name_map.get(tid, tid)
-
-                    hname = _resolve_basic_team(home_id)
-                    aname = _resolve_basic_team(away_id)
-
-
-                    # Cột penalty_winner (Home / Away), nếu có
-                    pen = str(r.get("penalty_winner", "")).strip().lower()
-
+                        return None
+                
+                    hname = resolve_ref(row.get("home_team_id",""))
+                    aname = resolve_ref(row.get("away_team_id",""))
+                
+                    pen = str(row.get("penalty_winner","")).strip().lower()
+                
                     if hg > ag:
-                        winner, loser = hname, aname
-                    elif hg < ag:
-                        winner, loser = aname, hname
-                    else:
-                        # Hoà: nếu có penalty_winner thì dùng để phân thắng thua
-                        if pen in ("home", "h"):
-                            winner, loser = hname, aname
-                        elif pen in ("away", "a"):
-                            winner, loser = aname, hname
-                        else:
-                            # Hoà mà chưa xác định thắng pen -> bỏ qua
+                        return (hname, aname)
+                    if hg < ag:
+                        return (aname, hname)
+                
+                    if pen in ("home","h"):
+                        return (hname, aname)
+                    if pen in ("away","a"):
+                        return (aname, hname)
+                    return None
+                
+                # chạy nhiều vòng để resolve dần Winner/Loser
+                for _ in range(6):
+                    changed = False
+                    for _, r in mm.iterrows():
+                        mid = str(r.get("match_id","")).strip()
+                        if not mid:
                             continue
+                        res = decide_winner_loser(r)
+                        if not res:
+                            continue
+                        w, l = res
+                        if win_by_match.get(mid) != w or lose_by_match.get(mid) != l:
+                            win_by_match[mid] = w
+                            lose_by_match[mid] = l
+                            changed = True
+                    if not changed:
+                        break
 
-                    win_by_match[mid] = winner
-                    lose_by_match[mid] = loser
 
                 def resolve_slot(s: str) -> str:
                     s = str(s).strip()
@@ -1497,6 +1517,7 @@ with tab_gallery:
                         st.image(url, caption=(caps[i] if i < len(caps) else ""), use_column_width=True)
     except Exception as e:
         st.error(f"Lỗi đọc sheet 'photos': {e}")
+
 
 
 
