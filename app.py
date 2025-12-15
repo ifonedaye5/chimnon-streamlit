@@ -1155,22 +1155,48 @@ with tab2:
                                     status_val = str(row_m.get("status", "")).strip()
                                     status_html = render_status_badge(status_val)
 
+                            # ====== knock-out dancing card ======
+                            is_finished = (score_html != "vs")
+                            
+                            status_class = "ko-finished" if is_finished else "ko-scheduled"
+                            
+                            winner_home = False
+                            winner_away = False
+                            if is_finished:
+                                try:
+                                    hg_s, ag_s = score_html.split("–")
+                                    hg_i = int(hg_s.strip())
+                                    ag_i = int(ag_s.strip())
+                                    if hg_i > ag_i:
+                                        winner_home = True
+                                    elif ag_i > hg_i:
+                                        winner_away = True
+                                except Exception:
+                                    pass
+                            
+                            home_cls = "ko-winner" if winner_home else ""
+                            away_cls = "ko-winner" if winner_away else ""
+                            
                             card_html = f"""
-                            <div style='border:1px solid #e9ecef;border-radius:10px;padding:8px 10px;margin-bottom:8px;background:#fff;'>
-                              <div style='display:flex;justify-content:space-between;gap:8px;font-size:14px;'>
-                                <div style='flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;'>{home}</div>
-                                <div style='font-weight:700;'>{score_html}</div>
-                                <div style='flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:right;'>{away}</div>
+                            <div class="ko-card {status_class}">
+                              <div style="display:flex;justify-content:space-between;gap:8px;font-size:14px;">
+                                <div class="{home_cls}" style="flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">
+                                  {home}
+                                </div>
+                                <div style="font-weight:800;">{score_html}</div>
+                                <div class="{away_cls}" style="flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:right;">
+                                  {away}
+                                </div>
                               </div>
-                              <div style='text-align:center;color:#6c757d;font-size:12px;margin-top:2px;'>
+                              <div style="text-align:center;color:#6b7280;font-size:12px;margin-top:2px;">
                                 {meta_line} {status_html}
                               </div>
-                              <div style='text-align:center;color:#94a3b8;font-size:11px;margin-top:2px;'>
+                              <div style="text-align:center;color:#94a3b8;font-size:11px;margin-top:2px;">
                                 {mid} {rr.get("notes","") or ""}
                               </div>
                             </div>
                             """
-                            st.markdown(card_html, unsafe_allow_html=True)
+
 
         elif view_mode == "Tách theo vòng":
             if show.empty:
@@ -1722,6 +1748,7 @@ with tab_gallery:
                         st.image(url, caption=(caps[i] if i < len(caps) else ""), use_column_width=True)
     except Exception as e:
         st.error(f"Lỗi đọc sheet 'photos': {e}")
+
 
 
 
