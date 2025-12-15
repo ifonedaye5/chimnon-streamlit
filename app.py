@@ -997,21 +997,61 @@ with tab2:
                     # nếu có lỗi thì knockout vẫn hiện A1, B4...
                     pass
 
-                # ----- Map winner / loser theo match_id (hỗ trợ penalty_winner) -----
+                # ----- Map winner / loser theo match_id (hỗ trợ penalty_winner, normalize ID) -----
                 mm = mdf.copy()
                 win_by_match, lose_by_match = {}, {}
-
+                
+                def _norm_mid(x: str) -> str:
+                    return str(x or "").strip().upper()
+                
                 for _, r in mm.iterrows():
-                    mid = str(r.get("match_id", "")).strip()
+                    mid = _norm_mid(r.get("match_id", ""))
                     if not mid:
                         continue
+                
+                    home_id = str(r.get("home_team_id", "")).strip()
+                    away_id = str(r.get("away_team_id", "")).strip()
+                
+                    def _resolve_basic_team(tid: str) -> str:
+                        if tid in slot_to_team:
+                            return slot_to_team[tid]
+                        return name_map.get(tid, tid)
+                
+                    hname = _resolve_basic_team(home_id)
+                    aname = _resolve_basic_team(away_id)
+                
+                    # Penalty winner (Home/Away) cho trường hợp hòa hoặc anh quên tỉ số
+                    pen = str(r.get("penalty_winner", "")).strip().lower()
+                
+                    # Parse tỉ số (có thể thiếu)
+                    hg = pd.to_numeric(r.get("home_goals", None), errors="coerce")
+                    ag = pd.to_numeric(r.get("away_goals", None), errors="coerce")
+                
+                    winner = loser = None
+                
+                    if pd.notna(hg) and pd.notna(ag):
+                        hg = int(hg); ag = int(ag)
+                        if hg > ag:
+                            winner, loser = hname, aname
+                        elif hg < ag:
+                            winner, loser = aname, hname
+                        else:
+                            # hòa -> dựa vào pen
+                            if pen in ("home", "h"):
+                                winner, loser = hname, aname
+                            elif pen in ("away", "a"):
+                                winner, loser = aname, hname
+                    else:
+                        # KHÔNG có tỉ số nhưng có pen -> vẫn xác định được
+                        if pen in ("home", "h"):
+                            winner, loser = hname, aname
+                        elif pen in ("away", "a"):
+                            winner, loser = aname, hname
+                
+                    if winner and loser:
+                        win_by_match[mid] = winner
+                        lose_by_match[mid] = loser
 
-                    # Tỉ số chính thức
-                    try:
-                        hg = int(r.get("home_goals"))
-                        ag = int(r.get("away_goals"))
-                    except Exception:
-                        continue
 
                     home_id = str(r.get("home_team_id", "")).strip()
                     away_id = str(r.get("away_team_id", "")).strip()
@@ -1057,11 +1097,12 @@ with tab2:
                         return slot_to_team.get(S, s)
                     # Winner M201 / Loser M301...
                     if S.startswith("WINNER "):
-                        mid = s.split()[-1]
+                        mid = _norm_mid(s.split()[-1])
                         return win_by_match.get(mid, s)
                     if S.startswith("LOSER "):
-                        mid = s.split()[-1]
+                        mid = _norm_mid(s.split()[-1])
                         return lose_by_match.get(mid, s)
+
                     # Trường hợp dùng trực tiếp match_id (M201) trong home_team_id/away_team_id
                     if S.startswith("M") and S[1:].isdigit():
                         return win_by_match.get(S, s)
@@ -1497,6 +1538,7 @@ with tab_gallery:
                         st.image(url, caption=(caps[i] if i < len(caps) else ""), use_column_width=True)
     except Exception as e:
         st.error(f"Lỗi đọc sheet 'photos': {e}")
+
 
 
 
