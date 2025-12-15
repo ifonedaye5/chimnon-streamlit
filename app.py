@@ -1237,7 +1237,6 @@ with tab3:
     name_map = dict(zip(tdf.get("team_id", pd.Series(dtype=str)),
                         tdf.get("team_name", pd.Series(dtype=str))))
 
-    # ========= BÊN TRÁI: DANH SÁCH CẦU THỦ =========
     # ========= BÊN TRÁI: DANH SÁCH CẦU THỦ (có lọc) =========
     with left:
         st.subheader("Danh sách cầu thủ")
@@ -1247,10 +1246,6 @@ with tab3:
             pdf = players_df.copy()
             pdf.columns = [c.strip().lower() for c in pdf.columns]
 
-            # Map team_id -> team_name (dùng lại name_map đã tạo phía trên tab3)
-            # name_map được tạo ngay trước đó:
-            # name_map = dict(zip(tdf.get("team_id", pd.Series(dtype=str)),
-            #                     tdf.get("team_name", pd.Series(dtype=str))))
             pdf["Đội"] = pdf.get("team_id", "").map(name_map).fillna(pdf.get("team_id", ""))
 
             # ==== Bộ lọc ====
@@ -1265,14 +1260,12 @@ with tab3:
 
             show = pdf.copy()
 
-            # Lọc theo đội
             if team_pick != "Tất cả":
                 show = show[show["Đội"] == team_pick]
 
-            # Tìm nhanh theo tên, số áo, mã cầu thủ
             if q.strip():
                 qq = q.strip().lower()
-                def s(col):  # helper an toàn
+                def s(col):
                     return show.get(col, pd.Series(dtype=str)).astype(str).str.lower()
                 mask = (
                     s("player_name").str.contains(qq, na=False) |
@@ -1281,14 +1274,12 @@ with tab3:
                 )
                 show = show[mask]
 
-            # Sắp xếp mặc định theo Đội -> Số áo (nếu có)
             if "shirt_number" in show.columns:
                 show["__shirt_num__"] = pd.to_numeric(show["shirt_number"], errors="coerce")
                 show = show.sort_values(by=["Đội", "__shirt_num__", "player_name"], na_position="last")
             else:
                 show = show.sort_values(by=["Đội", "player_name"])
 
-            # Chọn & đổi tên cột sang tiếng Việt
             cols = [c for c in [
                 "player_id","player_name","Đội","shirt_number","position","dob","nationality","is_registered"
             ] if c in show.columns]
@@ -1302,9 +1293,10 @@ with tab3:
                 "is_registered": "Đã đăng ký"
             })
 
-            st.dataframe(display_players.drop(columns=[c for c in ["__shirt_num__"] if c in display_players.columns]),
-                         use_container_width=True)
-
+            st.dataframe(
+                display_players.drop(columns=[c for c in ["__shirt_num__"] if c in display_players.columns]),
+                use_container_width=True
+            )
 
     # ========= BÊN PHẢI: THỐNG KÊ =========
     with right:
@@ -1343,11 +1335,10 @@ with tab3:
                     else:
                         st.info("Chưa có bàn thắng nào.")
 
-                                # ==== Thẻ phạt + TIỀN PHẠT theo đội ====
+                # ==== Thẻ phạt + TIỀN PHẠT theo đội ====
                 card_types = ["yellow","red","second_yellow","yellow_plus_direct_red"]
                 cards = ev[ev.get("event_type","").isin(card_types)]
                 if not cards.empty:
-                    # Pivot đếm số thẻ / cầu thủ
                     card_pvt = (cards.pivot_table(index="player_id",
                                                   columns="event_type",
                                                   aggfunc="size",
@@ -1355,24 +1346,17 @@ with tab3:
                                       .reset_index())
                     card_pvt.columns = [str(c) for c in card_pvt.columns]
 
-                    # Merge thông tin cầu thủ + tên đội
                     card_pvt = pmini.merge(card_pvt, how="right", on="player_id")
 
-                    # ----- CẤU HÌNH MỨC PHẠT (đ đơn vị: đồng) -----
-                    FINE_YELLOW = 200_000                # thẻ vàng
-                    FINE_SECOND_YELLOW = 300_000         # thẻ đỏ gián tiếp (2 vàng)
-                    FINE_RED = 500_000                   # thẻ đỏ trực tiếp
-                    # TH NOTE: 'yellow_plus_direct_red' không nêu trong điều lệ tiền phạt.
-                    # Ở đây mình giả định = Vàng (200k) + Đỏ trực tiếp (500k) = 700k.
-                    # Nếu bạn muốn = 500k thôi, đổi FINE_YPR = 500_000 là xong.
-                    FINE_YPR = 700_000                   # vàng + đỏ trực tiếp (giả định)
+                    FINE_YELLOW = 200_000
+                    FINE_SECOND_YELLOW = 300_000
+                    FINE_RED = 500_000
+                    FINE_YPR = 700_000
 
-                    # Bảo vệ cột có thể thiếu
                     for c in ["yellow","second_yellow","red","yellow_plus_direct_red"]:
                         if c not in card_pvt.columns:
                             card_pvt[c] = 0
 
-                    # Tính tổng tiền phạt cho từng cầu thủ
                     card_pvt["Tiền phạt"] = (
                         card_pvt["yellow"] * FINE_YELLOW +
                         card_pvt["second_yellow"] * FINE_SECOND_YELLOW +
@@ -1380,7 +1364,6 @@ with tab3:
                         card_pvt["yellow_plus_direct_red"] * FINE_YPR
                     )
 
-                    # === BỘ LỌC THEO ĐỘI để xem đội phải nộp bao nhiêu ===
                     teams_list = ["Tất cả"] + sorted(
                         pd.Series(pmini.get("Đội", [])).dropna().unique().tolist()
                     )
@@ -1390,14 +1373,12 @@ with tab3:
                     if pick_team != "Tất cả":
                         show_fines = show_fines[show_fines.get("Đội","") == pick_team]
 
-                    # Tổng tiền phạt của đội (hoặc toàn giải)
                     total_fine = int(show_fines["Tiền phạt"].sum())
                     if pick_team != "Tất cả":
                         st.markdown(f"**Tổng tiền phạt của đội _{pick_team}_:** `{total_fine:,} đ`")
                     else:
                         st.markdown(f"**Tổng tiền phạt toàn giải:** `{total_fine:,} đ`")
 
-                    # Đổi tên cột cho bảng chi tiết
                     rename_cards = {
                         "player_id": "Mã cầu thủ",
                         "player_name": "Cầu thủ",
@@ -1414,15 +1395,81 @@ with tab3:
                         "Tiền phạt"
                     ] if c in show_fines.columns]
 
-                    # Sắp theo Tiền phạt giảm dần
                     st.markdown("**Thẻ phạt (tạm tính) & Tiền phạt theo cầu thủ**")
                     st.dataframe(
-                        show_fines[keep]
-                            .sort_values(by="Tiền phạt", ascending=False),
+                        show_fines[keep].sort_values(by="Tiền phạt", ascending=False),
                         use_container_width=True
                     )
                 else:
                     st.info("Chưa có sự kiện thẻ nào.")
+
+        # ==========================================================
+        # ✅ THÊM MỚI: ĐỘI FAIR PLAY TOÀN GIẢI (leaderboard theo đội)
+        # ==========================================================
+        st.divider()
+        st.subheader("🤝 Đội Fair Play toàn giải")
+
+        if events_df.empty:
+            st.info("Chưa có dữ liệu 'events' để tính Fair Play.")
+        else:
+            ev2 = events_df.copy()
+            ev2.columns = [c.strip().lower() for c in ev2.columns]
+
+            # Điểm fairplay (càng thấp càng tốt)
+            fp_all = compute_fairplay(ev2)
+
+            # Đếm thẻ theo đội để show đẹp
+            def _cnt(et: str) -> dict:
+                if ev2.empty or "event_type" not in ev2.columns or "team_id" not in ev2.columns:
+                    return {}
+                s = ev2[ev2["event_type"].astype(str).str.lower() == et]
+                return s.groupby("team_id").size().to_dict()
+
+            c_y   = _cnt("yellow")
+            c_sy  = _cnt("second_yellow")
+            c_r   = _cnt("red")
+            c_ypr = _cnt("yellow_plus_direct_red")
+
+            team_ids = sorted(set(name_map.keys()) | set(fp_all.keys()))
+            rows = []
+            for tid in team_ids:
+                rows.append({
+                    "team_id": tid,
+                    "Đội": name_map.get(tid, tid),
+                    "Thẻ vàng": int(c_y.get(tid, 0)),
+                    "Đỏ gián tiếp (2V)": int(c_sy.get(tid, 0)),
+                    "Đỏ trực tiếp": int(c_r.get(tid, 0)),
+                    "Vàng+Đỏ": int(c_ypr.get(tid, 0)),
+                    "Điểm FairPlay": int(fp_all.get(tid, 0)),
+                })
+
+            fp_df = pd.DataFrame(rows)
+            if fp_df.empty:
+                st.info("Chưa có dữ liệu Fair Play.")
+            else:
+                # Sort kiểu A cơ bản:
+                # 1) Điểm FairPlay ↑ (ưu tiên tuyệt đối)
+                # 2) Tổng đỏ ↑ ít hơn tốt hơn
+                # 3) Thẻ vàng ↑ ít hơn tốt hơn
+                fp_df["Tổng đỏ"] = (
+                    fp_df["Đỏ trực tiếp"] +
+                    fp_df["Đỏ gián tiếp (2V)"] +
+                    fp_df["Vàng+Đỏ"]
+                )
+
+                fp_df = fp_df.sort_values(
+                    by=["Điểm FairPlay", "Tổng đỏ", "Thẻ vàng", "Đội"],
+                    ascending=[True, True, True, True]
+                ).reset_index(drop=True)
+
+                fp_df.insert(0, "Hạng", range(1, len(fp_df) + 1))
+
+                st.dataframe(
+                    fp_df[["Hạng","Đội","Điểm FairPlay","Thẻ vàng","Đỏ gián tiếp (2V)","Đỏ trực tiếp","Vàng+Đỏ"]],
+                    use_container_width=True,
+                    hide_index=True
+                )
+
 
 with tab_gallery:
     st.subheader("📸 Ảnh & Highlight")
@@ -1517,6 +1564,7 @@ with tab_gallery:
                         st.image(url, caption=(caps[i] if i < len(caps) else ""), use_column_width=True)
     except Exception as e:
         st.error(f"Lỗi đọc sheet 'photos': {e}")
+
 
 
 
