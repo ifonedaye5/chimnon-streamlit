@@ -607,7 +607,7 @@ with tab1:
 
 with tab2:
     st.subheader("Lịch thi đấu & Kết quả")
-    import re # <--- Thêm thư viện này để bắt chuỗi thông minh hơn
+    import re  # <--- Thư viện quan trọng để bắt mã trận đấu
 
     # --- 1. CHUẨN BỊ DỮ LIỆU ---
     if matches_df.empty:
@@ -656,7 +656,6 @@ with tab2:
                     # --- BƯỚC A: TÍNH BXH ĐỂ LẤY TÊN ĐỘI CHO A1, B2... ---
                     slot_to_team = {}
                     try:
-                        # Logic tính BXH để map A1 -> Tên Đội (như cũ)
                         groups = tdf.get("group", pd.Series(dtype=str)).astype(str).str.upper().unique().tolist()
                         groups = [g for g in groups if g and g.lower() != "nan"]
                         for g in groups:
@@ -676,26 +675,29 @@ with tab2:
                                     slot_to_team[k] = n
                     except: pass
 
-                    # --- BƯỚC B: TẠO TỪ ĐIỂN THẮNG/THUA TỪ FILE MATCHES ---
-                    win_map = {}  # { "M203": "FC Hội Tụ", ... }
-                    lose_map = {} # { "M203": "FC Báo Hiếu", ... }
+                    # --- BƯỚC B: TẠO TỪ ĐIỂN THẮNG/THUA (QUAN TRỌNG) ---
+                    # Chuẩn hoá ID trận đấu: Xóa khoảng trắng, viết hoa
+                    def clean_mid(x): return str(x).strip().upper()
+
+                    win_map = {}  # { "M203": "FC Hội Tụ" }
+                    lose_map = {} 
                     
-                    # Quan trọng: Sort match_id để đảm bảo trận M203 được xử lý trước M301
+                    # Sort match_id để đảm bảo trận trước (M203) được xử lý trước trận sau (M301)
                     mm_sorted = mdf.sort_values("match_id")
                     
                     for _, r in mm_sorted.iterrows():
-                        mid = str(r.get("match_id","")).strip().upper() # CHÌA KHÓA: UPPER & STRIP
+                        mid = clean_mid(r.get("match_id",""))
                         if not mid: continue
                         
-                        # Lấy ID đội (có thể là mã A01 hoặc A1)
+                        # Lấy ID đội thô (có thể là A1 hoặc Winner M...)
                         h_raw = str(r.get("home_team_id","")).strip()
                         a_raw = str(r.get("away_team_id","")).strip()
                         
-                        # Resolve ngay tại đây: Nếu h_raw là A1 thì đổi thành tên đội luôn
-                        h_name = slot_to_team.get(h_raw, name_map.get(h_raw, h_raw))
-                        a_name = slot_to_team.get(a_raw, name_map.get(a_raw, a_raw))
+                        # Thử resolve ngay nếu nó là Slot (A1)
+                        h_name = slot_to_team.get(h_raw, h_raw) # Nếu ko phải A1 thì giữ nguyên (Winner M...)
+                        a_name = slot_to_team.get(a_raw, a_raw)
                         
-                        # Lấy kết quả
+                        # Check kết quả
                         hg = pd.to_numeric(r.get("home_goals", None), errors="coerce")
                         ag = pd.to_numeric(r.get("away_goals", None), errors="coerce")
                         pen = str(r.get("penalty_winner","")).strip().lower()
@@ -704,47 +706,48 @@ with tab2:
                         if pd.notna(hg) and pd.notna(ag):
                             if hg > ag: w, l = h_name, a_name
                             elif hg < ag: w, l = a_name, h_name
-                            else: # Hòa
+                            else: 
                                 if pen in ("home","h"): w, l = h_name, a_name
                                 elif pen in ("away","a"): w, l = a_name, h_name
                         
-                        # LƯU VÀO DICT NẾU CÓ KẾT QUẢ
-                        if w and l:
-                            win_map[mid] = w
-                            lose_map[mid] = l
-                            
-                    # --- BƯỚC C: HÀM ĐỆ QUY GIẢI MÃ "Winner M..." ---
+                        # Lưu vào map (lưu cả chuỗi "Winner M203" nếu trận trước chưa giải mã xong)
+                        # Việc giải mã sâu sẽ do hàm đệ quy bên dưới làm
+                        if w: win_map[mid] = w
+                        if l: lose_map[mid] = l
+
+                    # --- BƯỚC C: HÀM ĐỆ QUY GIẢI MÃ THÔNG MINH (Dùng Regex) ---
                     def resolve_final_name(txt, depth=0):
-                        if depth > 5: return txt
+                        if depth > 10: return txt # Chặn lặp
+                        
                         txt = str(txt).strip()
                         U = txt.upper()
                         
-                        # 1. Check xem có phải là Slot A1, B2 không
+                        # 1. Check Slot (A1, B2...)
                         if U in slot_to_team: return slot_to_team[U]
                         
-                        # 2. Check xem có phải tham chiếu trận đấu không (M203, Winner M203...)
-                        # Dùng REGEX để bắt chính xác mã trận (VD: bắt chữ M + số)
+                        # 2. Check Mã trận (Mxxx) dùng REGEX
+                        # Tìm chuỗi bắt đầu bằng M theo sau là số (VD: M203 trong "Winner M203")
                         match_ref = re.search(r"(M\d+)", U)
                         
                         if match_ref:
-                            target_mid = match_ref.group(1) # Lấy được "M203" từ chuỗi "Winner M203"
+                            target_mid = match_ref.group(1) # Lấy được "M203"
                             is_loser = "LOSER" in U
                             
                             source = lose_map if is_loser else win_map
                             
+                            # Nếu tìm thấy M203 trong kết quả đã đá
                             if target_mid in source:
-                                # Nếu M203 đã có kết quả trong win_map, lấy tên đội đó ra
-                                # Đệ quy tiếp phòng trường hợp tên đội đó lại là 1 tham chiếu khác
+                                # Đệ quy tiếp: Vì kết quả của M301 có thể là "Winner M203"
+                                # Cần đào tiếp xem Winner M203 là ai
                                 return resolve_final_name(source[target_mid], depth + 1)
                             else:
-                                # Chưa đá xong -> Trả về nguyên văn (Winner M203)
+                                # Chưa đá -> Trả về text gốc
                                 return txt
                         
-                        # 3. Cuối cùng check trong danh sách đội
+                        # 3. Check Name Map (nếu là mã đội A01)
                         return name_map.get(txt, txt)
 
                     # --- BƯỚC D: VẼ SƠ ĐỒ ---
-                    # Chuẩn hoá thứ tự vòng
                     def order_round(x):
                         x = str(x).lower()
                         if "1/8" in x: return 1
@@ -761,35 +764,29 @@ with tab2:
                         st.info("Không có dữ liệu vòng đấu.")
                     else:
                         cols = st.columns(len(unique_rounds))
-                        
-                        # Gom nhóm theo vòng để vẽ cột
                         for i, r_idx in enumerate(unique_rounds):
-                            # Lấy tên vòng hiển thị từ dòng đầu tiên khớp index
                             sub = ko[ko["round_idx"] == r_idx].sort_values("match_id")
                             if sub.empty: continue
-                            
                             r_name = sub.iloc[0]["round"]
+                            
                             with cols[i]:
                                 st.markdown(f"#### {r_name}")
-                                
                                 for _, rr in sub.iterrows():
-                                    mid = str(rr.get("match_id",""))
+                                    mid = clean_mid(rr.get("match_id",""))
                                     
-                                    # Lấy label gốc từ sheet knockout
+                                    # Lấy nguồn đội từ knockout (Winner M...)
                                     raw_h = rr.get("slot_home_from","")
                                     raw_a = rr.get("slot_away_from","")
                                     
-                                    # GIẢI MÃ TÊN ĐỘI (Đây là bước sửa lỗi quan trọng nhất)
+                                    # GIẢI MÃ TÊN ĐỘI
                                     home_txt = resolve_final_name(raw_h)
                                     away_txt = resolve_final_name(raw_a)
                                     
-                                    # Lấy tỉ số thực tế
+                                    # Lấy tỉ số thực tế từ matches
                                     score_txt = "vs"
-                                    stt_badge = ""
+                                    status_txt = ""
                                     
-                                    # Tra cứu lại match thực tế để lấy tỉ số
-                                    # (Lưu ý: win_map ở trên đã tính rồi, nhưng ở đây lấy lại để hiện tỉ số)
-                                    m_row = mdf[mdf["match_id"].astype(str).str.upper() == mid.upper()]
+                                    m_row = mdf[mdf["match_id"].astype(str).str.strip().str.upper() == mid]
                                     if not m_row.empty:
                                         mr = m_row.iloc[0]
                                         try:
@@ -797,9 +794,9 @@ with tab2:
                                             ag = int(mr.get("away_goals"))
                                             score_txt = f"{hg} - {ag}"
                                         except: pass
-                                        stt_badge = render_status_badge(mr.get("status",""))
+                                        status_txt = render_status_badge(mr.get("status",""))
                                     
-                                    # Card HTML
+                                    # Render Card
                                     st.markdown(f"""
                                     <div style="background:white; border:1px solid #e2e8f0; border-radius:8px; padding:10px; margin-bottom:12px; box-shadow:0 1px 2px rgba(0,0,0,0.05);">
                                         <div style="display:flex; flex-direction:column; gap:6px;">
@@ -813,10 +810,11 @@ with tab2:
                                             </div>
                                         </div>
                                         <div style="margin-top:6px; font-size:10px; color:#94a3b8; text-align:right;">
-                                            {stt_badge} <span style="margin-left:4px;">{mid}</span>
+                                            {status_txt} <span style="margin-left:4px;">{mid}</span>
                                         </div>
                                     </div>
                                     """, unsafe_allow_html=True)
+
                 except Exception as e:
                     st.error(f"Lỗi hiển thị sơ đồ: {e}")
 
@@ -825,24 +823,42 @@ with tab2:
             show = mdf.copy()
             if grp != "Tất cả": show = show[show.get("group", "").astype(str).str.upper() == grp]
             if rnd != "Tất cả": show = show[show.get("round", "") == rnd]
-            
-            if {"date","time"}.issubset(show.columns):
-                show = show.sort_values(by=["date","time","match_id"])
+            if {"date","time"}.issubset(show.columns): show = show.sort_values(by=["date","time","match_id"])
             
             if show.empty:
                 st.info("Không có trận đấu nào.")
             else:
+                def render_match_card_std(row):
+                    h = name_map.get(str(row.get("home_team_id","")), str(row.get("home_team_id","")))
+                    a = name_map.get(str(row.get("away_team_id","")), str(row.get("away_team_id","")))
+                    try:
+                        hg = int(row.get("home_goals"))
+                        ag = int(row.get("away_goals"))
+                        sc = f"{hg} - {ag}"
+                    except: sc = "vs"
+                    st.markdown(f"""
+                    <div style="background:white; border:1px solid #e5e7eb; border-radius:8px; padding:12px; margin-bottom:8px;">
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <div style="flex:1; font-weight:600;">{h}</div>
+                            <div style="background:#f3f4f6; padding:4px 12px; border-radius:6px; font-weight:bold;">{sc}</div>
+                            <div style="flex:1; text-align:right; font-weight:600;">{a}</div>
+                        </div>
+                        <div style="text-align:center; font-size:12px; color:#6b7280; margin-top:6px;">
+                            {row.get('date','')} {row.get('time','')} • {render_status_badge(row.get('status',''))}
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+
                 for _, row in show.iterrows():
-                    render_match_card(row)
+                    render_match_card_std(row)
                     with st.expander("Chi tiết"):
-                         # Render events như cũ
                          mid = str(row.get("match_id",""))
                          evs = evdf[evdf["match_id"].astype(str) == mid].sort_values("minute")
                          if evs.empty: st.write("Chưa có sự kiện.")
                          else:
                              for _, e in evs.iterrows():
                                  icon = "⚽" if "goal" in str(e.get("event_type")) else "•"
-                                 st.write(f"{e.get('minute')}' {icon} {e.get('player_id')} ({e.get('event_type')})")
+                                 st.write(f"{e.get('minute')}' {icon} {e.get('player_name')} ({e.get('event_type')})")
 
 
 
@@ -1138,6 +1154,7 @@ with tab_gallery:
                         st.image(url, caption=(caps[i] if i < len(caps) else ""), use_column_width=True)
     except Exception as e:
         st.error(f"Lỗi đọc sheet 'photos': {e}")
+
 
 
 
